@@ -101,7 +101,6 @@ downloads/
 eggs/
 .eggs/
 lib/
-!frontend/src/app/lib/supabaseClient.ts
 lib64/
 parts/
 sdist/

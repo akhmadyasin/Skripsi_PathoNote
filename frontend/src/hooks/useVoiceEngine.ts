@@ -98,16 +98,6 @@ export function useVoiceEngine() {
 
   const summarizeInFlightRef = useRef<boolean>(false);
 
-  // Prefer per-user/local mode saved at login/register (localStorage) before using backend default
-  const currentModeRef = useRef<string>(
-    (() => {
-      try {
-        const lsMode = localStorage.getItem("summaryMode");
-        if (lsMode) return lsMode;
-      } catch {}
-      return "patologi";
-    })()
-  );
   const lastEmitRef = useRef<number>(0);
   const MIN_SUMMARY_INTERVAL = 700; // ms
 
@@ -292,26 +282,6 @@ export function useVoiceEngine() {
     };
   }, []);
 
-  // ====== Ambil mode ringkasan ======
-  useEffect(() => {
-    // Only query backend if there's no per-user local choice
-    (async () => {
-      try {
-        const hasLocal = (() => {
-          try { if (localStorage.getItem("summaryMode")) return true; } catch {}
-          return false;
-        })();
-        if (hasLocal) return;
-
-        const r = await fetch(`${BACKEND_ORIGIN}/get_summary_mode`);
-        const j = await r.json();
-        if (j && j.mode) currentModeRef.current = j.mode;
-      } catch (e) {
-        // ignore
-      }
-    })();
-  }, []);
-
   // ====== SpeechRecognition setup ======
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -454,7 +424,7 @@ export function useVoiceEngine() {
     try {
       socketRef.current?.emit("summarize_stream", {
         text,
-        mode: currentModeRef.current,
+
       });
     } catch (e) {
       console.error("socket emit error:", e);
@@ -471,7 +441,7 @@ export function useVoiceEngine() {
         fetch(`${BACKEND_ORIGIN}/summarize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, mode: currentModeRef.current }),
+          body: JSON.stringify({ text }),
         })
           .then(async (response) => {
             const raw = await response.text();
@@ -599,7 +569,7 @@ export function useVoiceEngine() {
         user_id: user.id,
         original_text: (fullTranscriptRef.current || text).trim() || text,
         summary_result: text,
-        mode_used: currentModeRef.current || null,
+
         metadata: {
           saved_at: new Date().toISOString(),
           transcript_length: (fullTranscriptRef.current || "").length,

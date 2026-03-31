@@ -186,7 +186,6 @@ export default function Dashboard() {
               <Image src={avatar} alt="Foto profil" width={40} height={40} unoptimized />
               <div className={s.meta}>
                 <div className={s.name}>{username}</div>
-                <div className={s.role}></div>
               </div>
               {showProfileDropdown && (
                 <div className={s.profileDropdown}>

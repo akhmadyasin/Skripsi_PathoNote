@@ -8,7 +8,6 @@ export default function RegisterPage() {
   const supabase = supabaseBrowser();
 
   const [username, setUsername] = useState("");
-  const [summaryMode, setSummaryMode] = useState<"patologi" | "dokter_hewan">("patologi");
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm]   = useState("");
@@ -23,12 +22,12 @@ export default function RegisterPage() {
   if (password !== confirm) return setErr("Password confirmation does not match.");
 
     setLoading(true);
-    // Persist only summary_mode; don't duplicate with `role`.
+    // Use only pathologist mode (summary_mode hardcoded to "patologi")
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { username, summary_mode: summaryMode },
+        data: { username, summary_mode: "patologi" },
         emailRedirectTo: `${location.origin}/login`,
       },
     });
@@ -60,34 +59,14 @@ export default function RegisterPage() {
           {info && <div className="alert success">{info}</div>}
 
           <form onSubmit={onSubmit}>
-            {/* ROW: Username + Mode Ringkasan (2 kolom) */}
-            <div className="row-2">
-              <div className="field">
-                <label>Username</label>
-                <input
-                  placeholder="Choose a username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  autoComplete="username"
-                />
-              </div>
-
-              <div className="field">
-                <label>Role</label>
-                <div className="select">
-                  <select
-                    value={summaryMode}
-                    onChange={(e) => setSummaryMode(e.target.value as "patologi" | "dokter_hewan")}
-                    aria-label="Pilih mode ringkasan"
-                  >
-                    <option value="patologi">Pathologist</option>
-                    <option value="dokter_hewan">Veterinarian</option>
-                  </select>
-                  <span className="chev">▾</span>
-                </div>
-              </div>
-            </div>
+            <label>Username</label>
+            <input
+              placeholder="Choose a username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+              autoComplete="username"
+            />
 
             <label>Email</label>
             <input

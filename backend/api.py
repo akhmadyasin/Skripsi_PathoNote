@@ -205,31 +205,7 @@ def history_page():
 def settings_page():
     return render_template("settings.html")
 
-# di bagian atas file api.py (global)
-current_summary_mode = "patologi"  # default
-
-
-@app.route("/set_summary_mode", methods=["POST"])
-def set_summary_mode():
-    """Set mode ringkasan global."""
-    global current_summary_mode
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        mode = (data.get("mode") or "").strip().lower()
-        # hanya izinkan mode yang memang ada prompt-nya
-        allowed = ["patologi", "dokter_hewan"]
-        if mode not in allowed:
-            return jsonify({"error": "mode_invalid", "allowed": allowed}), 400
-        current_summary_mode = mode
-        print("[/set_summary_mode] set to", current_summary_mode)
-        return jsonify({"status": "ok", "mode": current_summary_mode})
-    except Exception as e:
-        print("ERROR /set_summary_mode:", e)
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/get_summary_mode", methods=["GET"])
-def get_summary_mode():
-    return jsonify({"mode": current_summary_mode})
+# Mode hardcoded to 'patologi' - no longer user-selectable
 
 
 # =========================
@@ -280,15 +256,14 @@ def summarize():
     try:
         data = request.get_json(force=True, silent=True) or {}
         text = (data.get("text") or "").strip()
-        mode = (data.get("mode") or current_summary_mode).strip().lower()
         if not text:
             return jsonify({"error": "Teks kosong"}), 400
 
         if not client:
             return jsonify({"error": "groq_api_key_missing", "message": "GROQ_API_KEY not configured"}), 500
 
-        prompt = build_prompt(text, mode)
-        print("[/summarize] text_len=", len(text), "mode=", mode)
+        prompt = build_prompt(text, "patologi")
+        print("[/summarize] text_len=", len(text))
 
         max_retries = 3
         base_sleep = 3.0
@@ -390,201 +365,15 @@ def save_echo():
         return jsonify({"error": str(e)}), 500
 
 
-def generate_share_token(length=32):
-    """Generate a random share token"""
-    alphabet = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
-
-
 @app.route("/api/history", methods=["GET"])
 def api_history():
     return jsonify({"history": history_store})
-
-
-# ---------- SHARE functionality ----------
-@app.route("/api/share/test", methods=["GET"])
-def test_share_endpoint():
-    """Test endpoint for share functionality"""
-    return jsonify({
-        "status": "success",
-        "message": "Share endpoint is working",
-        "supabase_configured": supabase is not None
-    })
-
-
-@app.route("/api/share/create", methods=["POST"])
-def create_share_token():
-    """Create a share token for a history item"""
-    try:
-        if not supabase:
-            return jsonify({"error": "supabase_not_configured"}), 500
-            
-        # Get authorization header
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({"error": "missing_auth_token"}), 401
-            
-        token = auth_header.split(' ')[1]
-        
-        # Verify token with Supabase using REST API
-        try:
-            import requests
-            headers = {
-                'Authorization': f'Bearer {token}',
-                'apikey': SUPABASE_SERVICE_KEY,
-                'Content-Type': 'application/json'
-            }
-            response = requests.get(f'{SUPABASE_URL}/auth/v1/user', headers=headers)
-            
-            if response.status_code != 200:
-                print(f"Token verification failed: {response.status_code}")
-                return jsonify({"error": "invalid_token"}), 401
-                
-            user_data = response.json()
-            if not user_data or 'id' not in user_data:
-                return jsonify({"error": "invalid_token"}), 401
-                
-            user_id = user_data['id']
-        except Exception as e:
-            print(f"Token verification error: {e}")
-            return jsonify({"error": "invalid_token"}), 401
-        
-        # Get request data
-        data = request.get_json(force=True, silent=True) or {}
-        history_id = data.get("history_id")
-        
-        if not history_id:
-            return jsonify({"error": "history_id_required"}), 400
-        
-        # Verify the history item belongs to the user
-        try:
-            history_response = supabase.table('histories').select('id').eq('id', history_id).eq('user_id', user_id).execute()
-            if not history_response.data or len(history_response.data) == 0:
-                return jsonify({"error": "history_not_found"}), 404
-        except Exception as e:
-            print(f"History verification error: {e}")
-            return jsonify({"error": "history_not_found"}), 404
-        
-        # Generate unique token
-        share_token = generate_share_token()
-        
-        # Set expiration (optional - 30 days from now)
-        expires_at = datetime.utcnow() + timedelta(days=30)
-        
-        # Create share token record
-        try:
-            share_response = supabase.table('share_tokens').insert({
-                'token': share_token,
-                'history_id': history_id,
-                'created_by': user_id,
-                'expires_at': expires_at.isoformat(),
-                'max_views': None,  # No limit
-                'view_count': 0,
-                'is_active': True
-            }).execute()
-            
-            if not share_response.data:
-                return jsonify({"error": "failed_to_create_token"}), 500
-                
-            return jsonify({
-                "status": "success",
-                "share_token": share_token,
-                "share_url": f"/share/{share_token}",
-                "expires_at": expires_at.isoformat()
-            })
-            
-        except Exception as e:
-            print(f"Share token creation error: {e}")
-            return jsonify({"error": "failed_to_create_token"}), 500
-            
-    except Exception as e:
-        print(f"Create share token error: {e}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/share/<token>", methods=["GET"])
-def get_shared_content(token):
-    """Get shared content by token (public access)"""
-    
-    if not supabase:
-        return jsonify({"error": "supabase_not_configured"}), 500
-        
-    if not token:
-        return jsonify({"error": "token_required"}), 400
-    
-    share_data = None
-    
-    try:
-        # --- A. Get and Validate Share Token ---
-        share_response = supabase.table('share_tokens').select('*').eq('token', token).eq('is_active', True).execute()
-        
-        if not share_response.data or len(share_response.data) == 0:
-            return jsonify({"error": "share_not_found"}), 404
-            
-        share_data = share_response.data[0]
-        
-        # Check expiration
-        if share_data.get('expires_at'):
-            # 1. Konversi expires_at menjadi timezone-aware
-            expires_at = datetime.fromisoformat(share_data['expires_at'].replace('Z', '+00:00'))
-            
-            # 2. Bandingkan dengan waktu saat ini yang juga timezone-aware (UTC)
-            # Perubahan di sini ⬇️
-            if datetime.now(timezone.utc) > expires_at: 
-                return jsonify({"error": "share_expired"}), 410
-        
-        # Check view limit
-        max_views = share_data.get('max_views')
-        view_count = share_data.get('view_count')
-        if max_views and max_views > 0 and view_count >= max_views:
-            return jsonify({"error": "share_limit_reached"}), 410
-            
-        # --- B. Get History Content ---
-        # NOTE: Sisa kode di sini harus dipastikan berada di luar blok try/except 
-        # validasi token agar share_data bisa diakses.
-        
-        history_response = supabase.table('histories').select('id, created_at, original_text, summary_result, metadata').eq('id', share_data['history_id']).execute()
-        
-        if not history_response.data or len(history_response.data) == 0:
-            return jsonify({"error": "content_not_found", "message": "History entry deleted"}), 404
-            
-        history_data = history_response.data[0]
-        
-        # --- C. Increment View Count (Update) ---
-        try:
-            # Menggunakan view_count yang DIBACA dari database untuk menghindari race condition ringan
-            supabase.table('share_tokens').update({
-                'view_count': view_count + 1
-            }).eq('token', token).execute()
-        except Exception as e:
-            print(f"Failed to increment view count: {e}")
-            
-        # --- D. Format dan Kembalikan Respon Sukses ---
-        response_data = {
-            "id": history_data['id'],
-            "date": history_data['created_at'],
-            "duration": (history_data.get('metadata') or {}).get('duration', ''),
-            "transcript": history_data['original_text'],
-            "summary": history_data['summary_result'],
-            "shared_at": share_data['created_at'],
-            "view_count": view_count + 1
-        }
-        
-        return jsonify(response_data), 200
-            
-    except Exception as e:
-        # Menangkap semua exception yang tidak terduga (RLS, Koneksi DB, NameError, dll.)
-        print(f"FATAL: Get shared content error: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "internal_server_error", "message": str(e)}), 500
 
 # ---------- STREAM summarize (SocketIO) ----------
 @socketio.on("summarize_stream")
 def handle_summarize_stream(data):
     sid = request.sid
     text = (data.get("text") or "").strip()
-    mode = (data.get("mode") or current_summary_mode).strip().lower()
     if not text:
         emit("summary_stream", {"error": "Teks kosong"})
         return
@@ -593,8 +382,8 @@ def handle_summarize_stream(data):
         emit("summary_stream", {"error": "groq_api_key_missing"})
         return
 
-    prompt = build_prompt(text, mode)
-    print(f"[stream] start SID={sid} text_len={len(text)} mode={mode}")
+    prompt = build_prompt(text, "patologi")
+    print(f"[stream] start SID={sid} text_len={len(text)}")
 
     stop_evt = Event()
     stop_flags[sid] = stop_evt

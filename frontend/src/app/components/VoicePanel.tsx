@@ -77,16 +77,6 @@ export default function VoicePanel() {
   const clearHlTimerRef = useRef<any>(null);
   const autoSummarizeTimerRef = useRef<any>(null);
   const summarizeInFlightRef = useRef<boolean>(false);
-  // Prefer per-user/local mode saved at login/register (localStorage) before using backend default
-  const currentModeRef = useRef<string>(
-    (() => {
-      try {
-        const lsMode = localStorage.getItem("summaryMode");
-        if (lsMode) return lsMode;
-      } catch {}
-      return "patologi";
-    })()
-  );
   const lastEmitRef = useRef<number>(0);
   
   // MODIFIKASI: Tingkatkan interval ke 3000ms (3 detik)
@@ -137,23 +127,6 @@ export default function VoicePanel() {
   };
   
   useEffect(() => {
-    // Only use backend mode if no local/user-selected mode exists
-    (async () => {
-      try {
-        const hasLocal = (() => {
-          try { if (localStorage.getItem("summaryMode")) return true; } catch {}
-          return false;
-        })();
-        if (hasLocal) return; // respect local choice
-
-        const r = await fetch(`${BACKEND_ORIGIN}/get_summary_mode`);
-        const data = await r.json();
-        if (data.mode) currentModeRef.current = data.mode;
-      } catch (err) {
-        console.error("Gagal mengambil mode:", err);
-      }
-    })();
-
     const socket = io(BACKEND_ORIGIN, { transports: ["websocket"] });
     socketRef.current = socket;
 
@@ -265,7 +238,7 @@ export default function VoicePanel() {
         summaryEditorRef.current.innerHTML = "<i>Memproses ringkasan...</i>";
     }
     
-    socketRef.current.emit("summarize_stream", { text, mode: currentModeRef.current });
+    socketRef.current.emit("summarize_stream", { text });
   };
 
   return (
@@ -437,7 +410,6 @@ export default function VoicePanel() {
                     user_id: user.id,
                     original_text: original || summaryText,
                     summary_result: summaryText,
-                    mode_used: currentModeRef.current || null,
                     metadata: {
                       saved_at: new Date().toISOString(),
                       transcript_length: (original || "").length,

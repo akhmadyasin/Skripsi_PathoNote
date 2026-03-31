@@ -80,33 +80,7 @@ export default function SettingsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // --- NEW: State for summary mode ---
-  const [mode, setMode] = useState<string>("");
-  const [modeStatus, setModeStatus] = useState<string>("");
 
-  // --- NEW: Fetch current mode from Flask backend ---
-  useEffect(() => {
-    const fetchMode = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/get_summary_mode`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.mode) {
-            setMode(data.mode);
-            setModeStatus("Mode saat ini: " + data.mode);
-          } else {
-            setModeStatus("Mode saat ini: (tidak diketahui)");
-          }
-        } else {
-          setModeStatus("Gagal ambil mode dari server (HTTP " + res.status + ")");
-        }
-      } catch (err: any) {
-        setModeStatus("Gagal sambung ke server: " + (err?.message || err));
-      }
-    };
-
-    fetchMode();
-  }, []);
 
   // load from localStorage
   useEffect(() => {
@@ -235,39 +209,7 @@ export default function SettingsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showProfileDropdown]);
 
-  // --- NEW: Handler to submit summary mode ---
-  const handleModeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setModeStatus("Menyimpan...");
 
-    try {
-      const res = await fetch(`${API_BASE}/set_summary_mode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
-      });
-
-      const data = await res.json().catch(() => ({ error: "invalid_response" }));
-
-      if (!res.ok) {
-        setModeStatus("Error: " + (data?.error || "HTTP " + res.status));
-        return;
-      }
-
-      if (data?.mode) {
-        setModeStatus("Mode tersimpan: " + data.mode);
-        showToast("Mode ringkasan berhasil disimpan!", "success");
-      } else if (data?.error) {
-        setModeStatus("Error: " + data.error);
-        showToast("Gagal menyimpan mode: " + data.error, "error");
-      } else {
-        setModeStatus("Tersimpan (respons server tidak terduga)");
-      }
-    } catch (err: any) {
-      setModeStatus("Gagal menyimpan: " + (err?.message || err));
-      showToast("Gagal menyimpan mode: " + (err?.message || err), "error");
-    }
-  };
 
 
   // derived values
