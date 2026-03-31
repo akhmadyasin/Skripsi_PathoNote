@@ -417,10 +417,28 @@ export default function VoicePanel() {
                     },
                   } as any;
 
-                  const { error } = await supabase.from("histories").insert([payload]);
-                  if (error) {
-                    console.warn("Supabase insert error:", error);
-                    showToast("Gagal menyimpan ringkasan ke database.", "error");
+                  console.log("[VoicePanel] Saving payload:", payload);
+                  try {
+                    const response = await supabase.from("histories").insert([payload]);
+                    console.log("[VoicePanel] Full response:", response);
+                    const { error, data: insertData, status } = response;
+                    
+                    if (error) {
+                      console.error("❌ Supabase insert error:", error);
+                      console.error("Error details:", {
+                        message: error.message,
+                        code: error.code,
+                        details: error.details,
+                        hint: error.hint,
+                      });
+                      showToast(`Gagal: ${error.message || 'Database error'}`, "error");
+                      return;
+                    }
+                    
+                    console.log("[VoicePanel] Insert successful! Status:", status, "Data:", insertData);
+                  } catch (err: any) {
+                    console.error("❌ Exception during save:", err);
+                    showToast(`Error: ${err.message || 'Unknown error'}`, "error");
                     return;
                   }
 
