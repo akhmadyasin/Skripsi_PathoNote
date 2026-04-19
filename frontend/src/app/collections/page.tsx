@@ -6,7 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css"; // reuse layout styles
-import h from "@/app/styles/history.module.css";   // styles khusus history
+import h from "@/app/styles/collections.module.css";   // styles khusus collections
 
 type UserMeta = {
   username?: string;
@@ -14,7 +14,7 @@ type UserMeta = {
   [k: string]: any;
 };
 
-type HistoryItem = {
+type CollectionItem = {
   id: string;
   date: string;       
   duration: string;   
@@ -22,9 +22,9 @@ type HistoryItem = {
   summary: string;
 };
 
-const SAMPLE: HistoryItem[] = [];
+const SAMPLE: CollectionItem[] = [];
 
-export default function HistoryPage() {
+export default function CollectionsPage() {
   const router = useRouter();
   const supabase = supabaseBrowser();
 
@@ -33,9 +33,14 @@ export default function HistoryPage() {
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileStatus, setProfileStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<HistoryItem[]>(SAMPLE);
+  const [items, setItems] = useState<CollectionItem[]>(SAMPLE);
 
   useEffect(() => {
     let mounted = true;
@@ -55,7 +60,7 @@ export default function HistoryPage() {
         const userId = userRes?.data?.user?.id;
 
         let query = supabase
-          .from('histories')
+          .from('collections')
           .select('id, created_at, original_text, summary_result, metadata')
           .order('created_at', { ascending: false });
 
@@ -64,9 +69,9 @@ export default function HistoryPage() {
         const { data, error } = await query;
 
         if (error) {
-          console.error('Error fetching summaries:', error);
+          console.error('Error fetching collections:', error);
         } else if (data) {
-          const mapped: HistoryItem[] = data.map((d: any) => ({
+          const mapped: CollectionItem[] = data.map((d: any) => ({
             id: d.id,
             date: format(new Date(d.created_at), 'dd MMM yyyy, HH:mm'),
             duration: (d.metadata && d.metadata.duration) || '',
@@ -76,7 +81,7 @@ export default function HistoryPage() {
           setItems(mapped);
         }
       } catch (err) {
-        console.error('Unexpected error fetching summaries', err);
+        console.error('Unexpected error fetching collections', err);
       } finally {
         setLoading(false);
       }
@@ -132,7 +137,7 @@ export default function HistoryPage() {
   };
 
   const handleDelete = (id: string) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus riwayat ini?")) return;
+    if (!confirm("Apakah Anda yakin ingin menghapus koleksi ini?")) return;
 
     // optimistic UI update
     const prev = items;
@@ -146,7 +151,7 @@ export default function HistoryPage() {
           throw new Error('User tidak terautentikasi');
         }
         const { data: deleted, error } = await supabase
-          .from('histories')
+          .from('collections')
           .delete()
           .eq('id', id)
           .eq('user_id', userId)
@@ -158,7 +163,7 @@ export default function HistoryPage() {
           throw new Error('Tidak dapat menghapus baris di database (akses ditolak atau baris tidak ditemukan)');
         }
       } catch (err: any) {
-        alert('Gagal menghapus riwayat: ' + (err?.message || String(err)));
+        alert('Gagal menghapus koleksi: ' + (err?.message || String(err)));
         setItems(prev); // rollback
       }
     })();
@@ -177,11 +182,57 @@ export default function HistoryPage() {
     setShowProfileDropdown(false);
   };
 
+  const openProfileModal = () => {
+    setProfileName(meta.display_name || meta.username || email.split("@")[0] || "");
+    setProfileEmail(email);
+    setProfileStatus(null);
+    setShowProfileDropdown(false);
+    setShowProfileModal(true);
+  };
+
+  const closeProfileModal = () => {
+    setShowProfileModal(false);
+    setProfileStatus(null);
+  };
+
+  const saveProfile = async () => {
+    setProfileStatus(null);
+    if (!profileName.trim()) {
+      setProfileStatus({ type: "error", message: "Nama tidak boleh kosong." });
+      return;
+    }
+    if (!profileEmail.trim()) {
+      setProfileStatus({ type: "error", message: "Email tidak boleh kosong." });
+      return;
+    }
+
+    setIsSavingProfile(true);
+    const { data: { user }, error } = await supabase.auth.updateUser({
+      email: profileEmail,
+      data: {
+        display_name: profileName,
+        username: profileName,
+      },
+    });
+
+    if (error) {
+      setProfileStatus({ type: "error", message: error.message });
+      setIsSavingProfile(false);
+      return;
+    }
+
+    const userMeta = (user?.user_metadata as UserMeta) || {};
+    setMeta(userMeta);
+    setEmail(user?.email || profileEmail);
+    setProfileStatus({ type: "success", message: "Profil berhasil disimpan." });
+    setIsSavingProfile(false);
+  };
+
   if (loading) {
     return (
       <div className={s.app}>
         <main className={s.content}>
-          <div className={s.card}>Loading history...</div>
+          <div className={s.card}>Loading collections...</div>
         </main>
       </div>
     );
@@ -211,12 +262,12 @@ export default function HistoryPage() {
               </svg>
               <span>Dashboard</span>
             </a>
-            <a className={`${s.navItem} ${s.active}`} href="/history">
+            <a className={`${s.navItem} ${s.active}`} href="/collections">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12,6 12,12 16,14"></polyline>
               </svg>
-              <span>History</span>
+              <span>Collections</span>
             </a>
             <a className={s.navItem} href="/settings">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -244,10 +295,10 @@ export default function HistoryPage() {
               </svg>
               <input
                 type="search"
-                placeholder="Search history..."
+                placeholder="Search collections..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search history"
+                aria-label="Search collections"
               />
             </div>
           </div>
@@ -267,7 +318,7 @@ export default function HistoryPage() {
               
               {showProfileDropdown && (
                 <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={closeProfileDropdown}>
+                  <button className={s.dropdownItem} onClick={openProfileModal}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                       <circle cx="12" cy="7" r="4"></circle>
@@ -293,7 +344,7 @@ export default function HistoryPage() {
       <main className={s.content}>
         <div className={h.historyContainer}>
           <div className={h.historyHeader}>
-            <h2 className={h.title}>Transcription History</h2>
+            <h2 className={h.title}>Collections</h2>
             <div className={h.headerActions}>
               <button className={h.actionButton} onClick={() => alert('Export functionality coming soon!')}>
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -316,8 +367,8 @@ export default function HistoryPage() {
                   <path d="M3 3v5h5"></path>
                 </svg>
               </div>
-              <h3>No History Yet</h3>
-              <p>Start using Voice to Text to see your transcription history and summaries here.</p>
+              <h3>No Collections Yet</h3>
+              <p>Start using Voice to Text to see your transcription collections and summaries here.</p>
             </div>
           ) : (
             <div className={h.historyGrid}>
@@ -421,7 +472,57 @@ export default function HistoryPage() {
           )}
         </div>
       </main>
+
+      {/* Profile Modal */}
+      {showProfileModal && (
+        <div className={s.profileModalOverlay} onClick={closeProfileModal}>
+          <div className={s.profileModal} onClick={(event) => event.stopPropagation()}>
+            <div className={s.profileModalHeader}>
+              <div>
+                <h2>Edit Profil</h2>
+                <p className={s.profileModalNotice}>Nama dan email diambil dari akun Supabase Anda.</p>
+              </div>
+              <button className={s.modalClose} onClick={closeProfileModal} aria-label="Tutup">×</button>
+            </div>
+
+            <div className={s.profileModalBody}>
+              <label className={s.formRow}>
+                <span>Nama</span>
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Nama tampil"
+                />
+              </label>
+              <label className={s.formRow}>
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                  placeholder="Email"
+                />
+              </label>
+            </div>
+
+            {profileStatus && (
+              <div className={profileStatus.type === "error" ? s.profileError : s.profileSuccess}>
+                {profileStatus.message}
+              </div>
+            )}
+
+            <div className={s.profileModalFooter}>
+              <button className={s.buttonSecondary} onClick={closeProfileModal} type="button">
+                Batal
+              </button>
+              <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
+                {isSavingProfile ? "Menyimpan..." : "Simpan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-

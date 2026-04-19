@@ -27,7 +27,11 @@ export default function RegisterPage() {
       email,
       password,
       options: {
-        data: { username, summary_mode: "patologi" },
+        data: {
+          username,
+          display_name: username,
+          summary_mode: "patologi",
+        },
         emailRedirectTo: `${location.origin}/login`,
       },
     });

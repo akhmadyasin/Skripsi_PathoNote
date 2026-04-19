@@ -419,7 +419,7 @@ export default function VoicePanel() {
 
                   console.log("[VoicePanel] Saving payload:", payload);
                   try {
-                    const response = await supabase.from("histories").insert([payload]);
+                    const response = await supabase.from("collections").insert([payload]);
                     console.log("[VoicePanel] Full response:", response);
                     const { error, data: insertData, status } = response;
                     
@@ -443,8 +443,8 @@ export default function VoicePanel() {
                   }
 
                   try { localStorage.setItem(LS_LAST_SUMMARY_KEY, summaryText); } catch {}
-                  showToast("Ringkasan tersimpan ke History", "success");
-                  setTimeout(() => { window.location.href = "/history"; }, 350);
+                  showToast("Ringkasan tersimpan ke Collections", "success");
+                  setTimeout(() => { window.location.href = "/collections"; }, 350);
                 } catch (err) {
                   console.error("Save to Supabase error:", err);
                   showToast("Gagal menyimpan — coba lagi.", "error");

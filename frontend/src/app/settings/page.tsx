@@ -63,6 +63,11 @@ export default function SettingsPage() {
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileStatus, setProfileStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // form state
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
@@ -194,6 +199,52 @@ export default function SettingsPage() {
     setShowProfileDropdown(false);
   };
 
+  const openProfileModal = () => {
+    setProfileName(meta.display_name || meta.username || email.split("@")[0] || "");
+    setProfileEmail(email);
+    setProfileStatus(null);
+    setShowProfileDropdown(false);
+    setShowProfileModal(true);
+  };
+
+  const closeProfileModal = () => {
+    setShowProfileModal(false);
+    setProfileStatus(null);
+  };
+
+  const saveProfile = async () => {
+    setProfileStatus(null);
+    if (!profileName.trim()) {
+      setProfileStatus({ type: "error", message: "Nama tidak boleh kosong." });
+      return;
+    }
+    if (!profileEmail.trim()) {
+      setProfileStatus({ type: "error", message: "Email tidak boleh kosong." });
+      return;
+    }
+
+    setIsSavingProfile(true);
+    const { data: { user }, error } = await supabase.auth.updateUser({
+      email: profileEmail,
+      data: {
+        display_name: profileName,
+        username: profileName,
+      },
+    });
+
+    if (error) {
+      setProfileStatus({ type: "error", message: error.message });
+      setIsSavingProfile(false);
+      return;
+    }
+
+    const userMeta = (user?.user_metadata as UserMeta) || {};
+    setMeta(userMeta);
+    setEmail(user?.email || profileEmail);
+    setProfileStatus({ type: "success", message: "Profil berhasil disimpan." });
+    setIsSavingProfile(false);
+  };
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -260,12 +311,12 @@ export default function SettingsPage() {
               </svg>
               <span>Dashboard</span>
             </a>
-            <a className={s.navItem} href="/history">
+            <a className={s.navItem} href="/collections">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12,6 12,12 16,14"></polyline>
               </svg>
-              <span>History</span>
+              <span>Collections</span>
             </a>
             <a className={`${s.navItem} ${s.active}`} href="/settings">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -310,7 +361,7 @@ export default function SettingsPage() {
               
               {showProfileDropdown && (
                 <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={closeProfileDropdown}>
+                  <button className={s.dropdownItem} onClick={openProfileModal}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                       <circle cx="12" cy="7" r="4"></circle>
@@ -632,6 +683,57 @@ export default function SettingsPage() {
       {toast && (
         <div className={`${h.toast} ${toast.type === "success" ? h.success : h.error}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {/* Profile Modal */}
+      {showProfileModal && (
+        <div className={s.profileModalOverlay} onClick={closeProfileModal}>
+          <div className={s.profileModal} onClick={(event) => event.stopPropagation()}>
+            <div className={s.profileModalHeader}>
+              <div>
+                <h2>Edit Profil</h2>
+                <p className={s.profileModalNotice}>Nama dan email diambil dari akun Supabase Anda.</p>
+              </div>
+              <button className={s.modalClose} onClick={closeProfileModal} aria-label="Tutup">×</button>
+            </div>
+
+            <div className={s.profileModalBody}>
+              <label className={s.formRow}>
+                <span>Nama</span>
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Nama tampil"
+                />
+              </label>
+              <label className={s.formRow}>
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                  placeholder="Email"
+                />
+              </label>
+            </div>
+
+            {profileStatus && (
+              <div className={profileStatus.type === "error" ? s.profileError : s.profileSuccess}>
+                {profileStatus.message}
+              </div>
+            )}
+
+            <div className={s.profileModalFooter}>
+              <button className={s.buttonSecondary} onClick={closeProfileModal} type="button">
+                Batal
+              </button>
+              <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
+                {isSavingProfile ? "Menyimpan..." : "Simpan"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -493,3 +493,137 @@
     font-size: 20px;
   }
 }
+
+.profileModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 18px;
+}
+
+.profileModal {
+  width: min(520px, 100%);
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
+  padding: 28px;
+  border: 1px solid #e5e7eb;
+}
+
+.profileModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.profileModalHeader h2 {
+  margin: 0;
+  font-size: 22px;
+  color: #111827;
+}
+
+.profileModalNotice {
+  margin: 8px 0 0;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.modalClose {
+  border: none;
+  background: transparent;
+  color: #374151;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.profileModalBody {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.formRow {
+  display: grid;
+  gap: 8px;
+}
+
+.formRow span {
+  font-weight: 600;
+  color: #111827;
+}
+
+.formRow input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #111827;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.formRow input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+}
+
+.profileModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.buttonPrimary,
+.buttonSecondary {
+  min-width: 100px;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+}
+
+.buttonPrimary {
+  background: #4f46e5;
+  color: white;
+}
+
+.buttonPrimary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.buttonSecondary {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.profileError,
+.profileSuccess {
+  margin-bottom: 16px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.profileError {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.profileSuccess {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}

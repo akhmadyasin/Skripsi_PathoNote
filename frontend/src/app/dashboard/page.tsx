@@ -33,6 +33,11 @@ export default function Dashboard() {
   const [listening, setListening] = useState(false);
   const toggleListening = () => setListening((v) => !v);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileStatus, setProfileStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // recent summaries
   const [recentSummaries, setRecentSummaries] = useState<RecentSummary[]>([
@@ -66,8 +71,11 @@ export default function Dashboard() {
         router.replace("/login");
         return;
       }
+      const userMeta = (session.user.user_metadata as UserMeta) || {};
       setEmail(session.user.email || "");
-      setMeta((session.user.user_metadata as UserMeta) || {});
+      setMeta(userMeta);
+      setProfileName(userMeta.display_name || userMeta.username || "");
+      setProfileEmail(session.user.email || "");
       setLoading(false);
     })();
 
@@ -114,12 +122,58 @@ export default function Dashboard() {
     router.replace("/login");
   };
 
+  const openProfileModal = () => {
+    setProfileName(meta.display_name || meta.username || email.split("@")[0] || "");
+    setProfileEmail(email);
+    setProfileStatus(null);
+    setShowProfileDropdown(false);
+    setShowProfileModal(true);
+  };
+
+  const closeProfileModal = () => {
+    setShowProfileModal(false);
+    setProfileStatus(null);
+  };
+
   const toggleProfileDropdown = () => {
     setShowProfileDropdown(!showProfileDropdown);
   };
 
   const closeProfileDropdown = () => {
     setShowProfileDropdown(false);
+  };
+
+  const saveProfile = async () => {
+    setProfileStatus(null);
+    if (!profileName.trim()) {
+      setProfileStatus({ type: "error", message: "Nama tidak boleh kosong." });
+      return;
+    }
+    if (!profileEmail.trim()) {
+      setProfileStatus({ type: "error", message: "Email tidak boleh kosong." });
+      return;
+    }
+
+    setIsSavingProfile(true);
+    const { data: { user }, error } = await supabase.auth.updateUser({
+      email: profileEmail,
+      data: {
+        display_name: profileName,
+        username: profileName,
+      },
+    });
+
+    if (error) {
+      setProfileStatus({ type: "error", message: error.message });
+      setIsSavingProfile(false);
+      return;
+    }
+
+    const userMeta = (user?.user_metadata as UserMeta) || {};
+    setMeta(userMeta);
+    setEmail(user?.email || profileEmail);
+    setProfileStatus({ type: "success", message: "Profil berhasil disimpan." });
+    setIsSavingProfile(false);
   };
 
   const username = meta.username || "Faisal";
@@ -158,7 +212,7 @@ export default function Dashboard() {
           </div>
           <nav className={s.nav} aria-label="Sidebar">
             <a className={`${s.navItem} ${s.active}`} href="/dashboard"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9,22 9,12 15,12 15,22"></polyline></svg><span>Dashboard</span></a>
-            <a className={s.navItem} href="/history"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg><span>History</span></a>
+            <a className={s.navItem} href="/collections"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg><span>Collections</span></a>
             <a className={s.navItem} href="/settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span>Settings</span></a>
           </nav>
           <div className={s.sbFooter}>
@@ -189,8 +243,57 @@ export default function Dashboard() {
               </div>
               {showProfileDropdown && (
                 <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={closeProfileDropdown}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> Profile</button>
+                  <button className={s.dropdownItem} onClick={openProfileModal}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> Profile</button>
                   <button className={s.dropdownItem} onClick={onLogout}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16,17 21,12 16,7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg> Logout</button>
+                </div>
+              )}
+              {showProfileModal && (
+                <div className={s.profileModalOverlay} onClick={closeProfileModal}>
+                  <div className={s.profileModal} onClick={(event) => event.stopPropagation()}>
+                    <div className={s.profileModalHeader}>
+                      <div>
+                        <h2>Edit Profil</h2>
+                        <p className={s.profileModalNotice}>Nama dan email diambil dari akun Supabase Anda.</p>
+                      </div>
+                      <button className={s.modalClose} onClick={closeProfileModal} aria-label="Tutup">×</button>
+                    </div>
+
+                    <div className={s.profileModalBody}>
+                      <label className={s.formRow}>
+                        <span>Nama</span>
+                        <input
+                          type="text"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          placeholder="Nama tampil"
+                        />
+                      </label>
+                      <label className={s.formRow}>
+                        <span>Email</span>
+                        <input
+                          type="email"
+                          value={profileEmail}
+                          onChange={(e) => setProfileEmail(e.target.value)}
+                          placeholder="Email"
+                        />
+                      </label>
+                    </div>
+
+                    {profileStatus && (
+                      <div className={profileStatus.type === "error" ? s.profileError : s.profileSuccess}>
+                        {profileStatus.message}
+                      </div>
+                    )}
+
+                    <div className={s.profileModalFooter}>
+                      <button className={s.buttonSecondary} onClick={closeProfileModal} type="button">
+                        Batal
+                      </button>
+                      <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
+                        {isSavingProfile ? "Menyimpan..." : "Simpan"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
