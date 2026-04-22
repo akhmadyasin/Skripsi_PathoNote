@@ -300,7 +300,7 @@ export default function SettingsPage() {
         <div className={s.sbInner}>
           <div className={s.brand}>
             <Image src="/logo_neurabot.jpg" alt="Logo Neurabot" width={36} height={36} className={s.brandImg} />
-            <div className={s.brandName}>Neurabot</div>
+            <div className={s.brandName}>PathoNote</div>
           </div>
 
           <nav className={s.nav} aria-label="Sidebar">

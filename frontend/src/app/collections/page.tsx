@@ -251,7 +251,7 @@ export default function CollectionsPage() {
               height={36}
               className={s.brandImg}
             />
-            <div className={s.brandName}>Neurabot</div>
+            <div className={s.brandName}>PathoNote</div>
           </div>
 
           <nav className={s.nav} aria-label="Sidebar">
