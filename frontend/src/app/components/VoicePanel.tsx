@@ -221,6 +221,20 @@ export default function VoicePanel() {
     }
   };
 
+  const saveToPathology = async (userId: string, text: string) => {
+    const response = await fetch(`${BACKEND_ORIGIN}/process-report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, user_id: userId }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || "Gagal menyimpan ke hasil_patologi");
+    }
+    return data;
+  };
+
   const requestSummarize = (text: string, showUI: boolean = true) => {
     if (!text || !socketRef.current?.connected) return;
 
@@ -417,13 +431,25 @@ export default function VoicePanel() {
                     },
                   } as any;
 
-                  console.log("[VoicePanel] Saving payload:", payload);
+                  let pathologySaved = false;
+                  let collectionSaved = false;
+                  let pathologyError: string | null = null;
+                  let collectionError: string | null = null;
+
+                  try {
+                    await saveToPathology(user.id, summaryText);
+                    pathologySaved = true;
+                  } catch (err: any) {
+                    pathologyError = err?.message || String(err);
+                    console.error("❌ Pathology save failed:", err);
+                  }
+
                   try {
                     const response = await supabase.from("collections").insert([payload]);
                     console.log("[VoicePanel] Full response:", response);
                     const { error, data: insertData, status } = response;
-                    
                     if (error) {
+                      collectionError = error.message;
                       console.error("❌ Supabase insert error:", error);
                       console.error("Error details:", {
                         message: error.message,
@@ -431,19 +457,34 @@ export default function VoicePanel() {
                         details: error.details,
                         hint: error.hint,
                       });
-                      showToast(`Gagal: ${error.message || 'Database error'}`, "error");
-                      return;
+                    } else {
+                      collectionSaved = true;
+                      console.log("[VoicePanel] Insert successful! Status:", status, "Data:", insertData);
                     }
-                    
-                    console.log("[VoicePanel] Insert successful! Status:", status, "Data:", insertData);
                   } catch (err: any) {
+                    collectionError = err?.message || String(err);
                     console.error("❌ Exception during save:", err);
-                    showToast(`Error: ${err.message || 'Unknown error'}`, "error");
+                  }
+
+                  if (!collectionSaved && !pathologySaved) {
+                    showToast("Gagal menyimpan ke Collections dan Hasil Patologi.", "error");
+                    return;
+                  }
+
+                  if (!collectionSaved) {
+                    showToast(`Hasil Patologi tersimpan, tetapi Collections gagal: ${collectionError}`, "info");
+                    return;
+                  }
+
+                  if (!pathologySaved) {
+                    showToast(`Collections tersimpan, tetapi Hasil Patologi gagal: ${pathologyError}`, "info");
+                    try { localStorage.setItem(LS_LAST_SUMMARY_KEY, summaryText); } catch {}
+                    setTimeout(() => { window.location.href = "/collections"; }, 350);
                     return;
                   }
 
                   try { localStorage.setItem(LS_LAST_SUMMARY_KEY, summaryText); } catch {}
-                  showToast("Ringkasan tersimpan ke Collections", "success");
+                  showToast("Ringkasan tersimpan ke Collections dan Hasil Patologi", "success");
                   setTimeout(() => { window.location.href = "/collections"; }, 350);
                 } catch (err) {
                   console.error("Save to Supabase error:", err);

@@ -156,6 +156,62 @@
   border-left: 4px solid #667eea;
 }
 
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.editInput,
+.editTextarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #111827;
+  background: #ffffff;
+}
+
+.editTextarea {
+  resize: vertical;
+  min-height: 90px;
+  line-height: 1.6;
+}
+
+.editActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.saveSuccess,
+.saveError {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.saveSuccess {
+  background: #ecfdf5;
+  border: 1px solid #10b981;
+  color: #065f46;
+}
+
+.saveError {
+  background: #fef2f2;
+  border: 1px solid #ef4444;
+  color: #991b1b;
+}
+
 .footerActions {
   display: flex;
   justify-content: flex-end;

@@ -62,89 +62,132 @@ def strip_think(text: str) -> str:
     """Hapus blok <think>...</think> bila ada."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
 
-def build_prompt(text: str, mode: str = "patologi") -> str:
-    mode = (mode or "patologi").lower()
-    if mode == "dokter_hewan":
-        return f"""
-Anda adalah seorang dokter hewan berpengalaman.
-Langsung berikan ringkasan final saja, tanpa proses berpikir.
-Ikuti format:
+def build_prompt(text: str) -> str:
+    # Daftar istilah medis sebagai referensi koreksi AI
+    anchor_terms = (
+        "Lien, Colon, Anus, Mammae, Appendix, Gaster, Hepar, Thyroid, Prostat, Ovarium, Uterus, "
+        "Vesica Fellea, Hiperemis, Perforasi, Kistik, Kenyal, Rapuh, Formalin, "
+        "Epitel Gepeng, Ulseratif, Spindel, Hiperplastis, Polimorfi, Hiperkromatis, Mitosis, "
+        "Udematus, Limfosit, Hemoroid, Carcinoma, Spindel Cell Carcinoma, "
+        "Infiltrasi, Nekrosis, Edema, Hemorajik, Splenomegali, Adenokarsinoma"
+    )
 
-**Ringkasan Klinis Hewan**
+    return f"""
+Anda adalah Dokter Spesialis Patologi Anatomi. Ekstrak teks laporan berikut ke JSON.
+Field yang harus dicari:
+- JARINGAN, LOKASI, DIDAPAT_DENGAN, CAIRAN_FIKSASI
+- DIAGNOSA_KLINIK, KETERANGAN_KLINIK
+- MAKROSKOPIK, MIKROSKOPIK, KESIMPULAN
 
-**Identitas Hewan:**
-- ...
+Daftar Istilah Medis (Gunakan sebagai referensi koreksi jika teks terdengar mirip):
+{anchor_terms}
 
-**Alasan Kunjungan:**
-- ...
+Aturan:
+1. Output WAJIB JSON saja.
+2. Jika tidak ada di teks, isi "".
+3. Gunakan bahasa medis yang baku.
+4. KOREKSI FONETIK: Jika menemukan kata yang salah tulis namun bunyinya mirip dengan istilah medis (contoh: 'Lion' menjadi 'Lien', 'Calon' menjadi 'Colon', 'Plenomegali' menjadi 'Splenomegali'), perbaikilah secara otomatis berdasarkan konteks laporan.
 
-**Riwayat Medis:**
-- ...
-
-**Pemeriksaan Fisik:**
-- ...
-
-**Pemeriksaan Penunjang:**
-- ...
-
-**Diagnosis / Implikasi:**
-- ...
-
-**Rencana Penanganan:**
-- ...
-
-**Prognosis:**
-- ...
-
-**Rekomendasi / Tindak Lanjut:**
-- ...
-
-Aturan ketat:
-- Hanya ekstrak fakta yang ada pada teks sumber.
-- Pertahankan angka/satuan persis seperti tertulis.
-- Jangan menambah atau mengubah fakta yang tidak ada di teks.
-
-Teks sumber:
-{text}
-
-Ringkasan:
+Teks: {text}
+JSON:
 """
-    else:
-        return f"""
-Anda adalah seorang dokter patologi berpengalaman.
-Langsung berikan ringkasan final saja, tanpa proses berpikir.
-Ikuti format:
 
-**Ringkasan Patologi Klinis**
+def call_llama_api(prompt: str) -> str:
+    """Panggil Groq API untuk ekstraksi JSON."""
+    if not client:
+        raise Exception("Groq client not initialized")
+    
+    try:
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model=MODEL,
+            temperature=0.1,  # Lower temperature for more consistent JSON output
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        print(f"[call_llama_api] Error: {e}")
+        return ""
 
-**Jenis Pemeriksaan:**
-- ...
+def extract_json(text: str) -> dict:
+    """Ekstrak JSON dari response AI."""
+    import json
+    try:
+        # Cari JSON dalam response
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start >= 0 and end > start:
+            json_str = text[start:end]
+            return json.loads(json_str)
+    except Exception as e:
+        print(f"[extract_json] Error parsing JSON: {e}")
+    
+    # Fallback: return empty dict
+    return {}
 
-**Jenis Spesimen:**
-- ...
+@app.route('/process-report', methods=['POST'])
+def process_report():
+    data = request.json
+    raw_text = data.get('text')
+    user_id = data.get('user_id')
+    
+    # 1. Panggil AI untuk Ekstraksi Medis
+    ai_response = call_llama_api(build_prompt(raw_text))
+    structured_data = extract_json(ai_response)
 
-**Hasil Pemeriksaan Makroskopik:**
-- ...
+    # 2. Siapkan Payload Lengkap sesuai Tabel SQL
+    # Kita bagi jadi beberapa bagian agar rapi
+    
+    final_payload = {
+        "user_id": user_id,
+        
+        # --- DATA ADMINISTRATIF ---
+        "kunjungan": data.get("kunjungan", "AUTO-" + datetime.now().strftime("%Y%m%d%H%M")),
+        "tanggal": datetime.now().strftime("%Y-%m-%d"),
+        "waktu": datetime.now().strftime("%H:%M:%S"),
+        "jenis_pemeriksaan": 1,
+        "id_simgos": "layanan.laboratorium.pa.hasil.Model-3", # Sesuai format JSON RS kamu
+        "nomor_pa": data.get("nomor_pa", "000000"),
+        "pa_sebelumnya": "",
+        "asisten": data.get("asisten", "AI-PathoNote"),
+        "dokter": 14, # Hardcoded Jazay / Bisa ambil dari profil
+        "oleh": 0,
+        "status": 1,
 
-**Hasil Pemeriksaan Mikroskopik:**
-- ...
+        # --- DATA TEKNIS MEDIS (Hasil Ekstraksi AI) ---
+        "jaringan": structured_data.get("JARINGAN", ""),
+        "lokasi": structured_data.get("LOKASI", ""),
+        "didapat_dengan": structured_data.get("DIDAPAT_DENGAN", ""),
+        "cairan_fiksasi": structured_data.get("CAIRAN_FIKSASI", ""),
+        "diagnosa_klinik": structured_data.get("DIAGNOSA_KLINIK", ""),
+        "keterangan_klinik": structured_data.get("KETERANGAN_KLINIK", ""),
+        
+        # --- OUTPUT UTAMA ---
+        "makroskopik": structured_data.get("MAKROSKOPIK", ""),
+        "mikroskopik": structured_data.get("MIKROSKOPIK", ""),
+        "kesimpulan": structured_data.get("KESIMPULAN", ""),
 
-**Diagnosis:**
-- ...
+        # --- DATA SPESIFIK TUMOR / TAMBAHAN (Default Values) ---
+        "permintaan_ihc": "",
+        "topography": "",
+        "morphology": "",
+        "grade": 0,
+        "perilaku_tumor": 0,
+        "imuno_histokimia": "",
+        "bukan_tumor": 1, 
+        "reevolusi": "",
+        "reevaluasi": "",
+        "tanggal_imuno": None,
 
-**Rekomendasi / Tindak Lanjut:**
-- ...
+        # --- TRACKING ---
+        "status_pengiriman": "pending"
+    }
 
-Aturan ketat:
-- Hanya ekstrak fakta yang ada pada teks sumber.
-- Pertahankan angka/satuan persis seperti tertulis.
-- Jangan menambah atau mengubah fakta yang tidak ada di teks.
-
-Teks sumber:
-{text}
-
-Ringkasan:
-"""
+    # 3. Insert ke Supabase
+    try:
+        response = supabase.table("hasil_patologi").insert(final_payload).execute()
+        return jsonify({"status": "success", "data": response.data}), 201
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 def _parse_retry_after_seconds(message: str):
@@ -262,7 +305,7 @@ def summarize():
         if not client:
             return jsonify({"error": "groq_api_key_missing", "message": "GROQ_API_KEY not configured"}), 500
 
-        prompt = build_prompt(text, "patologi")
+        prompt = build_prompt(text)
         print("[/summarize] text_len=", len(text))
 
         max_retries = 3
@@ -382,7 +425,7 @@ def handle_summarize_stream(data):
         emit("summary_stream", {"error": "groq_api_key_missing"})
         return
 
-    prompt = build_prompt(text, "patologi")
+    prompt = build_prompt(text)
     print(f"[stream] start SID={sid} text_len={len(text)}")
 
     stop_evt = Event()

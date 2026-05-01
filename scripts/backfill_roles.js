@@ -10,7 +10,7 @@ Usage:
 Notes:
 - This script requires the Supabase JS client and Node 18+ (fetch available).
 - It uses the Admin service role key to list and update users.
-- Mapping used: summary_mode === 'dokter_hewan' -> role = 'dokter_hewan', otherwise 'dokter_patologi'
+- All users default to role = 'dokter_patologi'.
 */
 
 import { createClient } from '@supabase/supabase-js';
@@ -47,8 +47,7 @@ async function listUsers(page = 1, perPage = 100) {
 }
 
 function deriveRoleFromMetadata(user) {
-  const summary = user?.user_metadata?.summary_mode;
-  return summary === 'dokter_hewan' ? 'dokter_hewan' : 'dokter_patologi';
+  return 'dokter_patologi';
 }
 
 (async () => {

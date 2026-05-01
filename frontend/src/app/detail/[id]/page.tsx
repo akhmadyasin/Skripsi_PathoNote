@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { format } from 'date-fns';
 import Image from "next/image";
 import { useRouter, useParams } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
 import s from "@/app/styles/dashboard.module.css";
 import d from "@/app/styles/detail.module.css";
+import h from "@/app/styles/collections.module.css";
 
 type UserMeta = {
   username?: string;
@@ -14,15 +16,108 @@ type UserMeta = {
   [k: string]: any;
 };
 
-type HistoryItem = {
-  id: string;
-  date: string;       
-  duration: string;   
-  transcript: string;
-  summary: string;
+type PathologyRecord = Record<string, any>;
+
+const REPORT_FIELD_ORDER = [
+  'kunjungan',
+  'tanggal',
+  'waktu',
+  'nomor_pa',
+  'id_simgos',
+  'jenis_pemeriksaan',
+  'pa_sebelumnya',
+  'asisten',
+  'dokter',
+  'oleh',
+  'status',
+  'status_data',
+  'status_pengiriman',
+  'jaringan',
+  'lokasi',
+  'topography',
+  'morphology',
+  'grade',
+  'perilaku_tumor',
+  'didapat_dengan',
+  'cairan_fiksasi',
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'makroskopik',
+  'mikroskopik',
+  'kesimpulan',
+  'permintaan_ihc',
+  'imuno_histokimia',
+  'bukan_tumor',
+  'reevolusi',
+  'tanggal_imuno',
+  'created_at',
+  'user_id',
+];
+
+const FIELD_LABELS: Record<string, string> = {
+  MAKROSKOPIK: 'Makroskopik',
+  MIKROSKOPIK: 'Mikroskopik',
+  KESIMPULAN: 'Kesimpulan',
+  JARINGAN: 'Jaringan',
+  LOKASI: 'Lokasi',
+  DIAGNOSA_KLINIK: 'Diagnosa Klinik',
+  KETERANGAN_KLINIK: 'Keterangan Klinik',
+  DIDAPAT_DENGAN: 'Diperoleh dengan',
+  CAIRAN_FIKSASI: 'Cairan Fiksasi',
 };
 
-// Simple formatter to render the structured summary returned by the realtime summarizer.
+const NON_EDITABLE_FIELDS = new Set([
+  'id',
+  'user_id',
+  'created_at',
+  'updated_at',
+]);
+
+function isEditableField(key: string) {
+  return !NON_EDITABLE_FIELDS.has(key.toLowerCase());
+}
+
+function formatFieldName(key: string) {
+  const normalized = key.toLowerCase();
+  const friendly = FIELD_LABELS[normalized.toUpperCase() as keyof typeof FIELD_LABELS];
+  if (friendly) return friendly;
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function renderFieldValue(value: any) {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function getReportFieldKeys(item: PathologyRecord) {
+  const ordered = REPORT_FIELD_ORDER.filter((key) => key in item);
+  const otherKeys = Object.keys(item).filter((key) => !ordered.includes(key));
+  return [...ordered, ...otherKeys];
+}
+
+function getReportText(item: PathologyRecord) {
+  return getReportFieldKeys(item)
+    .map((fieldKey) => `${formatFieldName(fieldKey)}: ${renderFieldValue(item[fieldKey])}`)
+    .join('\n');
+}
+
+function formatItemDate(item: PathologyRecord) {
+  if (item.tanggal) {
+    return `${item.tanggal}${item.waktu ? ` | ${item.waktu}` : ''}`;
+  }
+  if (item.created_at) {
+    try {
+      return format(new Date(item.created_at), 'dd MMM yyyy | HH:mm');
+    } catch {
+      return String(item.created_at);
+    }
+  }
+  return item.id || '';
+}
 // Supports **bold** markers, list items starting with '- ', and preserves line breaks.
 function renderSummaryHtml(src: string | undefined | null) {
   if (!src) return "";
@@ -90,24 +185,6 @@ function renderSummaryHtml(src: string | undefined | null) {
   return out.join('\n');
 }
 
-// Sample data - in real app this would come from API/database
-const SAMPLE_DATA: { [key: string]: HistoryItem } = {
-  "1": {
-    id: "1",
-    date: "15 Januari 2025, 14:30",
-    duration: "2 menit 15 detik",
-    transcript: 'Halo, ini adalah contoh transkrip dari sesi voice to text. Sistem ini bekerja dengan baik untuk mengkonversi suara menjadi teks secara real-time. Kemudian AI akan meringkas konten ini menjadi format yang lebih mudah dibaca. Proses ini melibatkan beberapa tahap yaitu capture audio, speech recognition, dan natural language processing untuk menghasilkan ringkasan yang akurat.',
-    summary: "Sesi voice to text berhasil mengkonversi suara menjadi teks dengan baik. Sistem bekerja real-time dan AI merangkum konten menjadi format yang mudah dibaca.",
-  },
-  "2": {
-    id: "2", 
-    date: "15 Januari 2025, 10:15",
-    duration: "1 menit 45 detik",
-    transcript: "Testing sistem voice recognition untuk memastikan semua fitur berfungsi dengan baik. Ini adalah uji coba kedua untuk memverifikasi kualitas transkripsi dan ringkasan AI. Hasilnya menunjukkan bahwa sistem dapat menangkap audio dengan jelas dan mengkonversinya menjadi teks yang akurat.",
-    summary: "Uji coba sistem voice recognition berhasil. Fitur transkripsi dan ringkasan AI berfungsi dengan baik.",
-  },
-};
-
 export default function DetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -126,10 +203,15 @@ export default function DetailPage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // detail data
-  const [detailData, setDetailData] = useState<HistoryItem | null>(null);
+  const [detailData, setDetailData] = useState<PathologyRecord | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValues, setEditValues] = useState<Partial<PathologyRecord>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // share popup
 
@@ -174,13 +256,13 @@ export default function DetailPage() {
 
     try {
       const { data, error } = await supabase
-        .from('collections')
-        .select('id, created_at, original_text, summary_result, metadata')
+        .from('hasil_patologi')
+        .select('*')
         .eq('id', id)
         .single();
 
       if (error) {
-        console.error('Error fetching summary:', error);
+        console.error('Error fetching pathology record:', error);
         setErrorText(error.message || JSON.stringify(error));
         setNotFound(true);
         return;
@@ -192,15 +274,7 @@ export default function DetailPage() {
         return;
       }
 
-      const mapped: HistoryItem = {
-        id: data.id,
-        date: data.created_at ? new Date(data.created_at).toLocaleString() : '',
-        duration: (data.metadata && data.metadata.duration) || '',
-        transcript: data.original_text,
-        summary: data.summary_result,
-      };
-
-      setDetailData(mapped);
+      setDetailData(data as PathologyRecord);
       setNotFound(false);
     } catch (err: any) {
       console.error('Unexpected error loading detail:', err);
@@ -250,6 +324,63 @@ export default function DetailPage() {
     alert("Text copied to clipboard!");
   };
 
+  const startEditing = () => {
+    if (!detailData) return;
+    const initial: Partial<PathologyRecord> = {};
+    getReportFieldKeys(detailData)
+      .filter(isEditableField)
+      .forEach((field) => {
+        initial[field] = detailData[field];
+      });
+    setEditValues(initial);
+    setSaveStatus(null);
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setIsEditing(false);
+    setSaveStatus(null);
+  };
+
+  const saveEdit = async () => {
+    if (!detailData) return;
+    setIsSaving(true);
+    setSaveStatus(null);
+
+    const updates: Record<string, any> = {};
+    getReportFieldKeys(detailData)
+      .filter(isEditableField)
+      .forEach((field) => {
+        if (field in editValues) {
+          updates[field] = editValues[field];
+        }
+      });
+
+    try {
+      const { data, error } = await supabase
+        .from('hasil_patologi')
+        .update(updates)
+        .eq('id', detailData.id)
+        .select('*')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        setDetailData(data as PathologyRecord);
+        setIsEditing(false);
+        setSaveStatus({ type: 'success', message: 'Perubahan berhasil disimpan.' });
+      }
+    } catch (err: any) {
+      console.error('Save error:', err);
+      setSaveStatus({ type: 'error', message: err?.message || 'Gagal menyimpan perubahan.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDelete = () => {
     if (!confirm("Are you sure you want to delete this transcription?")) return;
 
@@ -262,7 +393,7 @@ export default function DetailPage() {
           return;
         }
         const { data: deleted, error } = await supabase
-          .from('collections')
+          .from('hasil_patologi')
           .delete()
           .eq('id', id)
           .eq('user_id', userId)
@@ -290,7 +421,7 @@ export default function DetailPage() {
 
   const handleExport = () => {
     if (detailData) {
-      const content = `Transcription Detail\n\nDate: ${detailData.date}\nDuration: ${detailData.duration}\n\nTranscript:\n${detailData.transcript}\n\nSummary:\n${detailData.summary}`;
+      const content = getReportText(detailData);
       const blob = new Blob([content], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -383,8 +514,8 @@ export default function DetailPage() {
         <div className={s.app}>
           <main className={s.content}>
             <div className={s.card}>
-              <h3>Transcription not found</h3>
-              <p>The requested transcription could not be found. It may have been deleted or the ID is invalid.</p>
+              <h3>Data tidak ditemukan</h3>
+              <p>Data hasil patologi yang diminta tidak ditemukan. Mungkin sudah dihapus atau ID tidak valid.</p>
               <p style={{ fontSize: 12, color: '#666' }}>Requested id: <strong>{id}</strong></p>
               {errorText && (
                 <div style={{ marginTop: 8, color: '#b00' }}>
@@ -392,7 +523,7 @@ export default function DetailPage() {
                 </div>
               )}
               <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                <button className={d.actionButton} onClick={() => router.push('/history')}>Back to History</button>
+                <button className={d.actionButton} onClick={() => router.push('/collections')}>Kembali ke Collections</button>
                 <button className={d.actionButton} onClick={() => fetchDetail()} disabled={fetching}>
                   {fetching ? 'Retrying...' : 'Retry'}
                 </button>
@@ -498,10 +629,11 @@ export default function DetailPage() {
       {/* CONTENT */}
       <main className={s.content}>
         <div className={d.detailContainer}>
-          {/* Header */}
           <div className={d.detailHeader}>
             <div className={d.headerInfo}>
-              <h1 className={d.detailTitle}>Transcription Details</h1>
+              <h1 className={d.detailTitle}>
+                {detailData.nomor_pa ? `PA ${detailData.nomor_pa}` : 'Detail Hasil Patologi'}
+              </h1>
               <div className={d.detailMeta}>
                 <div className={d.metaItem}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -510,86 +642,78 @@ export default function DetailPage() {
                     <line x1="8" y1="2" x2="8" y2="6"></line>
                     <line x1="3" y1="10" x2="21" y2="10"></line>
                   </svg>
-                  {detailData.date}
+                  {formatItemDate(detailData)}
                 </div>
                 <div className={d.metaItem}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <polyline points="12,6 12,12 16,14"></polyline>
+                    <path d="M3 4h18"></path>
+                    <path d="M5 10h14"></path>
+                    <path d="M7 16h10"></path>
                   </svg>
-                  {detailData.duration}
+                  {detailData.jaringan ? `${detailData.jaringan}${detailData.lokasi ? ` • ${detailData.lokasi}` : ''}` : detailData.lokasi || '-'}
                 </div>
               </div>
             </div>
-            
+
             <div className={d.headerActions}>
+              <button className={d.actionButton} onClick={() => router.push('/collections')}>
+                Kembali
+              </button>
+              {!isEditing ? (
+                <button className={d.actionButton} onClick={startEditing}>
+                  Edit
+                </button>
+              ) : (
+                <>
+                  <button className={d.actionButton} onClick={saveEdit} disabled={isSaving}>
+                    {isSaving ? 'Menyimpan...' : 'Simpan'}
+                  </button>
+                  <button className={d.secondaryButton} onClick={cancelEditing} disabled={isSaving}>
+                    Batal
+                  </button>
+                </>
+              )}
               <button className={d.actionButton} onClick={handleExport}>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7,10 12,15 17,10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
                 Export
               </button>
-
             </div>
           </div>
 
-          {/* Content */}
-          <div className={d.detailContent}>
-            {/* Transcript Section */}
-            <section className={d.contentSection}>
-              <div className={d.sectionHeader}>
-                <h2 className={d.sectionTitle}>
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                    <line x1="12" y1="19" x2="12" y2="23"></line>
-                    <line x1="8" y1="23" x2="16" y2="23"></line>
-                  </svg>
-                  Full Transcript
-                </h2>
-                <button className={d.copyButton} onClick={() => handleCopy(detailData.transcript)}>
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                  </svg>
-                  Copy
-                </button>
-              </div>
-              <div className={d.transcriptContent}>
-                <div style={{ whiteSpace: 'pre-wrap' }}>{detailData.transcript}</div>
-              </div>
-            </section>
+          {saveStatus && (
+            <div className={saveStatus.type === 'success' ? d.saveSuccess : d.saveError} style={{ marginBottom: 16 }}>
+              {saveStatus.message}
+            </div>
+          )}
 
-            {/* Summary Section */}
-            <section className={d.contentSection}>
-              <div className={d.sectionHeader}>
-                <h2 className={d.sectionTitle}>
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14,2 14,8 20,8"></polyline>
-                    <line x1="16" y1="13" x2="8" y2="13"></line>
-                    <line x1="16" y1="17" x2="8" y2="17"></line>
-                    <polyline points="10,9 9,9 8,9"></polyline>
-                  </svg>
-                  AI Summary
-                </h2>
-                <button className={d.copyButton} onClick={() => handleCopy(detailData.summary)}>
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                  </svg>
-                  Copy
-                </button>
-              </div>
-              <div className={d.summaryContent}>
-                <div dangerouslySetInnerHTML={{ __html: renderSummaryHtml(detailData.summary) }} />
-              </div>
-            </section>
+          <div className={h.cardContent}>
+            <div className={h.reportFields}>
+              {getReportFieldKeys(detailData).map((fieldKey) => (
+                <div key={fieldKey} className={h.reportFieldRow}>
+                  <div className={h.reportFieldName}>{formatFieldName(fieldKey)}</div>
+                  {isEditing && isEditableField(fieldKey) ? (
+                    ['kesimpulan', 'makroskopik', 'mikroskopik', 'keterangan_klinik', 'diagnosa_klinik', 'didapat_dengan', 'cairan_fiksasi'].includes(fieldKey) ? (
+                      <textarea
+                        className={d.editTextarea}
+                        value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                        onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                        rows={3}
+                      />
+                    ) : (
+                      <input
+                        className={d.editInput}
+                        type="text"
+                        value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                        onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                      />
+                    )
+                  ) : (
+                    <div className={h.reportFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Footer Actions */}
           <div className={d.footerActions}>
             <button className={d.dangerButton} onClick={handleDelete}>
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

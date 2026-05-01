@@ -14,13 +14,163 @@ type UserMeta = {
   [k: string]: any;
 };
 
-type CollectionItem = {
-  id: string;
-  date: string;       
-  duration: string;   
-  transcript: string;
-  summary: string;
+type CollectionItem = Record<string, any>;
+
+const REPORT_FIELD_ORDER = [
+  'kunjungan',
+  'tanggal',
+  'waktu',
+  'nomor_pa',
+  'id_simgos',
+  'jenis_pemeriksaan',
+  'pa_sebelumnya',
+  'asisten',
+  'dokter',
+  'oleh',
+  'status',
+  'status_data',
+  'status_pengiriman',
+  'jaringan',
+  'lokasi',
+  'topography',
+  'morphology',
+  'grade',
+  'perilaku_tumor',
+  'didapat_dengan',
+  'cairan_fiksasi',
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'makroskopik',
+  'mikroskopik',
+  'kesimpulan',
+  'permintaan_ihc',
+  'imuno_histokimia',
+  'bukan_tumor',
+  'reevolusi',
+  'tanggal_imuno',
+  'created_at',
+  'user_id',
+];
+
+function formatFieldName(key: string) {
+  const normalized = key.toLowerCase();
+  const friendly = FIELD_LABELS[normalized.toUpperCase() as keyof typeof FIELD_LABELS];
+  if (friendly) return friendly;
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function renderFieldValue(value: any) {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+function getReportFieldKeys(item: CollectionItem) {
+  const ordered = REPORT_FIELD_ORDER.filter((key) => key in item);
+  const otherKeys = Object.keys(item).filter((key) => !ordered.includes(key));
+  return [...ordered, ...otherKeys];
+}
+
+function getReportText(item: CollectionItem) {
+  return getReportFieldKeys(item)
+    .map((fieldKey) => `${formatFieldName(fieldKey)}: ${renderFieldValue(item[fieldKey])}`)
+    .join('\n');
+}
+
+function formatItemDate(item: CollectionItem) {
+  if (item.tanggal) {
+    const parts = String(item.tanggal).split('-').map(Number);
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+      const datePart = `${String(day).padStart(2, '0')} ${monthNames[(month || 1) - 1]} ${year}`;
+      const timePart = item.waktu ? String(item.waktu).substring(0, 5) : '';
+      return timePart ? `${datePart} | ${timePart}` : datePart;
+    }
+    return item.tanggal + (item.waktu ? ` | ${String(item.waktu).substring(0, 5)}` : '');
+  }
+  if (item.created_at) {
+    try {
+      return format(new Date(item.created_at), 'dd MMM yyyy | HH:mm');
+    } catch {
+      return String(item.created_at);
+    }
+  }
+  return item.id || '';
+}
+
+function parseJsonSummary(text: string | null | undefined): Record<string, string> | null {
+  if (!text) return null;
+  const raw = text.trim();
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace < 0 || lastBrace < 0) return null;
+  const candidate = raw.substring(firstBrace, lastBrace + 1);
+  try {
+    const parsed = JSON.parse(candidate);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return Object.entries(parsed).reduce((acc, [key, value]) => {
+        acc[key] = value == null ? '' : String(value);
+        return acc;
+      }, {} as Record<string, string>);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  MAKROSKOPIK: 'Makroskopik',
+  MIKROSKOPIK: 'Mikroskopik',
+  KESIMPULAN: 'Kesimpulan',
+  JARINGAN: 'Jaringan',
+  LOKASI: 'Lokasi',
+  DIAGNOSA_KLINIK: 'Diagnosa Klinik',
+  KETERANGAN_KLINIK: 'Keterangan Klinik',
+  DIDAPAT_DENGAN: 'Diperoleh dengan',
+  CAIRAN_FIKSASI: 'Cairan Fiksasi',
 };
+
+function renderStructuredSummary(summary: string | null | undefined) {
+  const json = parseJsonSummary(summary);
+  if (!json) return null;
+  const keys = Object.keys(json);
+  if (!keys.length) return null;
+
+  const mainFields = ['MAKROSKOPIK', 'MIKROSKOPIK', 'KESIMPULAN'];
+  const hasMain = mainFields.some((k) => json[k]);
+
+  return (
+    <div className={h.summaryStructured}>
+      {hasMain && (
+        <>
+          {mainFields.map((field) => (
+            json[field] ? (
+              <p key={field} className={field === 'KESIMPULAN' ? h.conclusionLine : undefined}>
+                <strong>{FIELD_LABELS[field] || field}:</strong> {json[field]}
+              </p>
+            ) : null
+          ))}
+          <hr />
+        </>
+      )}
+      {keys.map((key) => {
+        if (mainFields.includes(key)) return null;
+        const value = json[key];
+        if (!value) return null;
+        return (
+          <p key={key}>
+            <strong>{FIELD_LABELS[key] || key}:</strong> {value}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
 
 const SAMPLE: CollectionItem[] = [];
 
@@ -60,8 +210,8 @@ export default function CollectionsPage() {
         const userId = userRes?.data?.user?.id;
 
         let query = supabase
-          .from('collections')
-          .select('id, created_at, original_text, summary_result, metadata')
+          .from('hasil_patologi')
+          .select('*')
           .order('created_at', { ascending: false });
 
         if (userId) query = query.eq('user_id', userId) as any;
@@ -69,16 +219,9 @@ export default function CollectionsPage() {
         const { data, error } = await query;
 
         if (error) {
-          console.error('Error fetching collections:', error);
+          console.error('Error fetching pathology records:', error?.message || error, error?.details || 'no details');
         } else if (data) {
-          const mapped: CollectionItem[] = data.map((d: any) => ({
-            id: d.id,
-            date: format(new Date(d.created_at), 'dd MMM yyyy, HH:mm'),
-            duration: (d.metadata && d.metadata.duration) || '',
-            transcript: d.original_text,
-            summary: d.summary_result,
-          }));
-          setItems(mapped);
+          setItems(data as CollectionItem[]);
         }
       } catch (err) {
         console.error('Unexpected error fetching collections', err);
@@ -118,12 +261,10 @@ export default function CollectionsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
-    return items.filter(
-      (it) =>
-        it.date.toLowerCase().includes(q) ||
-        it.duration.toLowerCase().includes(q) ||
-        it.transcript.toLowerCase().includes(q) ||
-        it.summary.toLowerCase().includes(q)
+    return items.filter((it) =>
+      Object.values(it)
+        .filter((value) => value !== null && value !== undefined)
+        .some((value) => String(value).toLowerCase().includes(q))
     );
   }, [items, query]);
 
@@ -151,7 +292,7 @@ export default function CollectionsPage() {
           throw new Error('User tidak terautentikasi');
         }
         const { data: deleted, error } = await supabase
-          .from('collections')
+          .from('hasil_patologi')
           .delete()
           .eq('id', id)
           .eq('user_id', userId)
@@ -295,10 +436,10 @@ export default function CollectionsPage() {
               </svg>
               <input
                 type="search"
-                placeholder="Search collections..."
+                placeholder="Search laporan..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search collections"
+                aria-label="Search laporan"
               />
             </div>
           </div>
@@ -367,8 +508,8 @@ export default function CollectionsPage() {
                   <path d="M3 3v5h5"></path>
                 </svg>
               </div>
-              <h3>No Collections Yet</h3>
-              <p>Start using Voice to Text to see your transcription collections and summaries here.</p>
+              <h3>No Reports Yet</h3>
+              <p>Start using Voice to Text to see your pathology reports from Supabase here.</p>
             </div>
           ) : (
             <div className={h.historyGrid}>
@@ -384,7 +525,7 @@ export default function CollectionsPage() {
                           <line x1="3" y1="10" x2="21" y2="10"></line>
                         </svg>
                       </span>
-                      {it.date}
+                      {formatItemDate(it)}
                     </div>
                     <div className={h.cardTopActions}>
                       <button className={h.exportBtn} onClick={() => alert('Export functionality coming soon!')} title="Export">
@@ -399,73 +540,50 @@ export default function CollectionsPage() {
                   </div>
 
                   <div className={h.cardContent}>
-                    <div className={h.transcriptSection}>
-                      <h4 className={h.sectionTitle}>
-                        <span className={h.sectionIcon}>
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                            <line x1="12" y1="19" x2="12" y2="23"></line>
-                            <line x1="8" y1="23" x2="16" y2="23"></line>
-                          </svg>
-                        </span>
-                        Transcript
-                      </h4>
-                      <div className={h.transcriptText}>
-                        {it.transcript}
-                      </div>
-                    </div>
+              <div>
+                <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
+                  [{it.nomor_pa || 'AUTO'}] - {it.jaringan || it.lokasi || '-'}
+                </div>
+                <div className={h.summary} style={{ marginBottom: 8 }}>
+                  <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}
+                </div>
+                <div className={h.itemDate}>
+                  {formatItemDate(it) || '-'}
+                </div>
+              </div>
+            </div>
 
-                    <div className={h.summarySection}>
-                      <h4 className={h.sectionTitle}>
-                        <span className={h.sectionIcon}>
-                          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14,2 14,8 20,8"></polyline>
-                            <line x1="16" y1="13" x2="8" y2="13"></line>
-                            <line x1="16" y1="17" x2="8" y2="17"></line>
-                            <polyline points="10,9 9,9 8,9"></polyline>
-                          </svg>
-                        </span>
-                        Summary
-                      </h4>
-                      <div className={h.summaryText}>
-                        {it.summary}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={h.cardActions}>
-                          <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
-                            <span className={h.btnIcon}>
-                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                              </svg>
-                            </span>
-                            View Details
-                          </button>
-                    <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(it.transcript)}>
-                      <span className={h.btnIcon}>
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-                          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                        </svg>
-                      </span>
-                      Copy
-                    </button>
-                    <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
-                      <span className={h.btnIcon}>
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3,6 5,6 21,6"></polyline>
-                          <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                          <line x1="10" y1="11" x2="10" y2="17"></line>
-                          <line x1="14" y1="11" x2="14" y2="17"></line>
-                        </svg>
-                      </span>
-                      Delete
-                    </button>
-                  </div>
+            <div className={h.cardActions}>
+              <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
+                <span className={h.btnIcon}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </span>
+                View Details
+              </button>
+              <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(getReportText(it))}>
+                <span className={h.btnIcon}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                  </svg>
+                </span>
+                Copy
+              </button>
+              <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
+                <span className={h.btnIcon}>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3,6 5,6 21,6"></polyline>
+                    <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                  </svg>
+                </span>
+                Delete
+              </button>
+            </div>
                 </article>
               ))}
             </div>
