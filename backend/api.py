@@ -17,6 +17,9 @@ from supabase import create_client, Client
 import secrets
 import string
 from datetime import timedelta
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # simple in-memory history store (newest first)
 history_store = []
@@ -35,6 +38,17 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+# Email configuration
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "akhmadyasin704@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "hmbrsrcnlxjrcrvj")
+EMAIL_SMTP_SERVER = os.environ.get("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
+
+print(f"[CONFIG] Email configured: {EMAIL_ADDRESS}")
+print(f"[CONFIG] SMTP Server: {EMAIL_SMTP_SERVER}:{EMAIL_SMTP_PORT}")
+if not EMAIL_PASSWORD:
+    print("[CONFIG] WARNING: Email password not configured!")
 
 # Initialize Supabase client
 supabase: Client = None
@@ -123,6 +137,86 @@ def extract_json(text: str) -> dict:
     
     # Fallback: return empty dict
     return {}
+
+
+# ---------- Helper function untuk mengirim email ----------
+def send_email_smtp(to_email: str, subject: str, body: str, is_html: bool = False) -> tuple[bool, str]:
+    """
+    Mengirim email menggunakan Gmail SMTP.
+    Returns: (success: bool, message: str)
+    """
+    try:
+        print(f"[send_email_smtp] Starting email send to: {to_email}")
+        print(f"[send_email_smtp] From: {EMAIL_ADDRESS}")
+        print(f"[send_email_smtp] SMTP Server: {EMAIL_SMTP_SERVER}:{EMAIL_SMTP_PORT}")
+        
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['From'] = EMAIL_ADDRESS
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # Attach body
+        if is_html:
+            msg.attach(MIMEText(body, 'html'))
+        else:
+            msg.attach(MIMEText(body, 'plain'))
+        
+        print(f"[send_email_smtp] Message created, connecting to SMTP...")
+        
+        # Connect to Gmail SMTP and send
+        with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
+            print(f"[send_email_smtp] Connected to SMTP, starting TLS...")
+            server.starttls()
+            print(f"[send_email_smtp] TLS started, logging in...")
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            print(f"[send_email_smtp] Login successful, sending message...")
+            server.send_message(msg)
+            print(f"[send_email_smtp] Message sent successfully!")
+        
+        return True, "Email berhasil dikirim"
+    except smtplib.SMTPAuthenticationError as e:
+        print(f"[send_email_smtp] Authentication Error: {e}")
+        return False, "Email atau sandi aplikasi Gmail tidak valid"
+    except smtplib.SMTPException as e:
+        print(f"[send_email_smtp] SMTP Error: {e}")
+        return False, f"SMTP Error: {str(e)}"
+    except Exception as e:
+        print(f"[send_email_smtp] General Exception: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, f"Error mengirim email: {str(e)}"
+
+
+def log_pengiriman_history(hasil_patologi_id: str, petugas_id: str, nama_petugas: str, 
+                           metode: str, tujuan: str, status: str) -> bool:
+    """
+    Log pengiriman ke history_pengiriman table
+    Returns: success (bool)
+    """
+    try:
+        if not supabase:
+            print("[log_pengiriman_history] Supabase not configured")
+            return False
+        
+        print(f"[log_pengiriman_history] Logging: {metode} to {tujuan} - {status}")
+        
+        payload = {
+            "hasil_patologi_id": hasil_patologi_id,
+            "petugas_id": petugas_id,
+            "nama_petugas": nama_petugas,
+            "metode_pengiriman": metode,
+            "tujuan_pengiriman": tujuan,
+            "status": status
+        }
+        
+        response = supabase.table("history_pengiriman").insert(payload).execute()
+        print(f"[log_pengiriman_history] Successfully logged: {response.data}")
+        return True
+    except Exception as e:
+        print(f"[log_pengiriman_history] Error: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return False
 
 @app.route('/process-report', methods=['POST'])
 def process_report():
@@ -408,9 +502,130 @@ def save_echo():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/history/<history_id>", methods=["DELETE"])
+def api_delete_history(history_id):
+    """Delete a history_pengiriman record using service role credentials."""
+    try:
+        if not supabase:
+            return jsonify({"status": "error", "message": "Supabase not configured"}), 500
+
+        response = supabase.table("history_pengiriman").delete().eq("id", history_id).execute()
+        if hasattr(response, "error") and response.error:
+            return jsonify({"status": "error", "message": response.error.message}), 400
+
+        if not getattr(response, "data", None) or len(response.data) == 0:
+            return jsonify({"status": "error", "message": "Record tidak ditemukan"}), 404
+
+        return jsonify({"status": "success", "data": response.data}), 200
+    except Exception as e:
+        print(f"[/api/history/<id>] EXCEPTION: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/api/history", methods=["GET"])
 def api_history():
     return jsonify({"history": history_store})
+
+
+# ---------- Email API endpoint ----------
+@app.route("/api/send-email", methods=["POST"])
+def api_send_email():
+    """Send email via Gmail SMTP and log to history_pengiriman"""
+    try:
+        print(f"\n[/api/send-email] === REQUEST RECEIVED ===")
+        
+        data = request.get_json(force=True, silent=True) or {}
+        print(f"[/api/send-email] Received data: {list(data.keys())}")
+        
+        to_email = data.get("to_email", "").strip()
+        subject = data.get("subject", "Hasil Patologi").strip()
+        body = data.get("body", "").strip()
+        is_html = data.get("is_html", False)
+        hasil_patologi_id = data.get("hasil_patologi_id", "").strip()
+        petugas_id = data.get("petugas_id", "").strip()
+        nama_petugas = data.get("nama_petugas", "Unknown").strip()
+        
+        print(f"[/api/send-email] to_email: {to_email}")
+        print(f"[/api/send-email] subject: {subject[:50]}...")
+        print(f"[/api/send-email] body length: {len(body)}")
+        print(f"[/api/send-email] hasil_patologi_id: {hasil_patologi_id}")
+        print(f"[/api/send-email] petugas_id: {petugas_id}")
+        print(f"[/api/send-email] nama_petugas: {nama_petugas}")
+        
+        # Validasi input
+        if not to_email:
+            print(f"[/api/send-email] ERROR: to_email is empty")
+            return jsonify({"status": "error", "message": "Email tujuan tidak boleh kosong"}), 400
+        
+        if not subject:
+            print(f"[/api/send-email] ERROR: subject is empty")
+            return jsonify({"status": "error", "message": "Subject tidak boleh kosong"}), 400
+        
+        if not body:
+            print(f"[/api/send-email] ERROR: body is empty")
+            return jsonify({"status": "error", "message": "Isi email tidak boleh kosong"}), 400
+        
+        # Validasi format email
+        if "@" not in to_email or "." not in to_email:
+            print(f"[/api/send-email] ERROR: Invalid email format")
+            # Log failed attempt even jika ID tidak lengkap
+            log_pengiriman_history(hasil_patologi_id, petugas_id, nama_petugas, "email", to_email, "failed")
+            return jsonify({"status": "error", "message": "Format email tidak valid"}), 400
+        
+        print(f"[/api/send-email] Validation passed, sending email...")
+        
+        # Kirim email
+        success, message = send_email_smtp(to_email, subject, body, is_html)
+        
+        print(f"[/api/send-email] Email send result: success={success}, message={message}")
+        
+        # Log ke history_pengiriman selalu jika ada koneksi Supabase
+        status_log = "success" if success else "failed"
+        print(f"[/api/send-email] About to call log_pengiriman_history with: {hasil_patologi_id}, {petugas_id}, {nama_petugas}, email, {to_email}, {status_log}")
+        log_pengiriman_history(hasil_patologi_id, petugas_id, nama_petugas, "email", to_email, status_log)
+        
+        if success:
+            print(f"[/api/send-email] SUCCESS: {message}")
+            return jsonify({"status": "success", "message": message}), 200
+        else:
+            print(f"[/api/send-email] FAILED: {message}")
+            return jsonify({"status": "error", "message": message}), 400
+            
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"[/api/send-email] EXCEPTION: {error_msg}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": error_msg}), 500
+
+
+@app.route("/api/test-email", methods=["GET"])
+def api_test_email():
+    """Test email configuration"""
+    try:
+        print(f"\n[/api/test-email] === TESTING EMAIL CONFIG ===")
+        print(f"[/api/test-email] EMAIL_ADDRESS: {EMAIL_ADDRESS}")
+        print(f"[/api/test-email] EMAIL_SMTP_SERVER: {EMAIL_SMTP_SERVER}")
+        print(f"[/api/test-email] EMAIL_SMTP_PORT: {EMAIL_SMTP_PORT}")
+        print(f"[/api/test-email] EMAIL_PASSWORD exists: {bool(EMAIL_PASSWORD)}")
+        
+        test_subject = "Test PathoNote Email"
+        test_body = "Ini adalah email test dari PathoNote backend.\n\nJika Anda menerima email ini, konfigurasi email sudah bekerja dengan baik!"
+        
+        success, message = send_email_smtp(EMAIL_ADDRESS, test_subject, test_body, False)
+        
+        if success:
+            return jsonify({"status": "success", "message": f"Email test berhasil: {message}"}), 200
+        else:
+            return jsonify({"status": "error", "message": f"Email test gagal: {message}"}), 400
+            
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"[/api/test-email] EXCEPTION: {error_msg}")
+        return jsonify({"status": "error", "message": error_msg}), 500
+
+
+# ---------- STREAM summarize (SocketIO) ----------
 
 # ---------- STREAM summarize (SocketIO) ----------
 @socketio.on("summarize_stream")

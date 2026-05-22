@@ -31,7 +31,13 @@ export default function Dashboard() {
 
   // ui state
   const [listening, setListening] = useState(false);
-  const toggleListening = () => setListening((v) => !v);
+  const [role, setRole] = useState("dokter");
+  const canUseVoice = role !== "petugas";
+
+  const toggleListening = () => {
+    if (role === "petugas") return;
+    setListening((v) => !v);
+  };
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -74,6 +80,7 @@ export default function Dashboard() {
       const userMeta = (session.user.user_metadata as UserMeta) || {};
       setEmail(session.user.email || "");
       setMeta(userMeta);
+      setRole((userMeta.role || "dokter").toString().toLowerCase());
       setProfileName(userMeta.display_name || userMeta.username || "");
       setProfileEmail(session.user.email || "");
       setLoading(false);
@@ -213,6 +220,7 @@ export default function Dashboard() {
           <nav className={s.nav} aria-label="Sidebar">
             <a className={`${s.navItem} ${s.active}`} href="/dashboard"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9,22 9,12 15,12 15,22"></polyline></svg><span>Dashboard</span></a>
             <a className={s.navItem} href="/collections"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg><span>Collections</span></a>
+            <a className={s.navItem} href="/history"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,8 12,12 15,15"></polyline></svg><span>History</span></a>
             <a className={s.navItem} href="/settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span>Settings</span></a>
           </nav>
           <div className={s.sbFooter}>
@@ -232,14 +240,22 @@ export default function Dashboard() {
             </div>
           </div>
           <div className={s.rightGroup}>
-            <button className={s.listenBtn} aria-pressed={listening} onClick={toggleListening}>
+            <button
+              className={s.listenBtn}
+              aria-pressed={listening}
+              onClick={toggleListening}
+              disabled={!canUseVoice}
+              title={canUseVoice ? "Start listening" : "Voice panel disabled for petugas"}
+              style={{ opacity: canUseVoice ? 1 : 0.6, cursor: canUseVoice ? "pointer" : "not-allowed" }}
+            >
               <span className={s.dot} aria-hidden />
-              <span className={s.btnLabel}>{listening ? "Close Panel" : "Start Listening"}</span>
+              <span className={s.btnLabel}>{listening ? "Close Panel" : canUseVoice ? "Start Listening" : "Voice not available"}</span>
             </button>
             <div className={s.avatar} onClick={toggleProfileDropdown}>
               <Image src={avatar} alt="Foto profil" width={40} height={40} unoptimized />
               <div className={s.meta}>
                 <div className={s.name}>{username}</div>
+                <div className={s.role}>{role === "petugas" ? "Petugas" : "Dokter"}</div>
               </div>
               {showProfileDropdown && (
                 <div className={s.profileDropdown}>
@@ -305,6 +321,11 @@ export default function Dashboard() {
       <main className={s.content}>
         {/* Tampilan Dashboard Utama */}
         <div className={s.dashboardContainer} style={{ display: listening ? 'none' : 'block' }}>
+          {role === "petugas" && (
+            <div style={{ marginBottom: 18, padding: 16, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 14, color: '#92400e' }}>
+              Akses Voice Panel dibatasi untuk role <strong>Petugas</strong>. Untuk membuka Voice Panel, gunakan akun dengan role <strong>Dokter</strong>.
+            </div>
+          )}
           {/* ... (seluruh isi dashboard Anda yang sebelumnya ada di dalam {!listening ? (...)}) ... */}
           <div className={s.topCards}>
             <div className={s.statsCard}><div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></div><div className={s.cardContent}><h3>Total Sessions</h3><div className={s.cardValue}>24</div><div className={s.cardSubtext}>+3 this week</div></div></div>

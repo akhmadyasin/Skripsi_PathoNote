@@ -172,6 +172,19 @@ function renderStructuredSummary(summary: string | null | undefined) {
   );
 }
 
+function decodeJwtPayload(token: string | null | undefined) {
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(atob(base64).split('').map((c) => '%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 const SAMPLE: CollectionItem[] = [];
 
 export default function CollectionsPage() {
@@ -182,6 +195,8 @@ export default function CollectionsPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
+  const [userRole, setUserRole] = useState<string>('');
+  const [tokenRole, setTokenRole] = useState<string>('');
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -203,18 +218,34 @@ export default function CollectionsPage() {
         return;
       }
       setEmail(session.user.email || "");
-      setMeta((session.user.user_metadata as UserMeta) || {});
+      const sessionMeta = (session.user.user_metadata as UserMeta) || {};
+      setMeta(sessionMeta);
+      const effectiveRole = ((session.user.user_metadata as any)?.role || 'dokter').toString().toLowerCase();
+      setUserRole(effectiveRole);
+      const decoded = decodeJwtPayload(session.access_token);
+      const tokenClaimRole = ((decoded as any)?.role || '').toString().toLowerCase();
+      setTokenRole(tokenClaimRole);
+      const isPetugas = effectiveRole === 'petugas';
       // fetch user summaries from Supabase (only for authenticated user)
       try {
-        const userRes = await supabase.auth.getUser();
-        const userId = userRes?.data?.user?.id;
+        const userId = session.user.id;
 
         let query = supabase
           .from('hasil_patologi')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (userId) query = query.eq('user_id', userId) as any;
+        if (userId && !isPetugas) query = query.eq('user_id', userId) as any;
+
+        console.debug('Collections fetch', {
+          userId,
+          effectiveRole,
+          tokenClaimRole,
+          isPetugas,
+          sessionMeta,
+          decodedJwtRole: tokenClaimRole,
+          query: userId && !isPetugas ? 'own records only' : 'all records',
+        });
 
         const { data, error } = await query;
 
@@ -410,6 +441,13 @@ export default function CollectionsPage() {
               </svg>
               <span>Collections</span>
             </a>
+            <a className={s.navItem} href="/history">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12,8 12,12 15,15"></polyline>
+              </svg>
+              <span>History</span>
+            </a>
             <a className={s.navItem} href="/settings">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>
@@ -486,6 +524,17 @@ export default function CollectionsPage() {
         <div className={h.historyContainer}>
           <div className={h.historyHeader}>
             <h2 className={h.title}>Collections</h2>
+            <div style={{ marginTop: 8, fontSize: 14, color: '#666' }}>
+              Role saat ini: <strong>{userRole || 'memuat...'}</strong>
+              {userRole === 'petugas' ? ' — Menampilkan semua koleksi' : ' — Menampilkan koleksi milik Anda'}
+              <br />
+              JWT claim: <strong>{tokenRole || 'tidak ada'}</strong>
+              {userRole === 'petugas' && !tokenRole ? (
+                <div style={{ color: '#b33', marginTop: 4 }}>
+                  Token belum punya claim role. Coba logout/login lagi.
+                </div>
+              ) : null}
+            </div>
             <div className={h.headerActions}>
               <button className={h.actionButton} onClick={() => alert('Export functionality coming soon!')}>
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

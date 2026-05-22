@@ -13,6 +13,7 @@
   "description": "A modern voice-to-text application built with Next.js, TypeScript, and Supabase.",
   "main": "index.js",
   "dependencies": {
+    "@supabase/supabase-js": "^2.106.1",
     "@types/diff": "^7.0.2",
     "ansi-regex": "^5.0.1",
     "ansi-styles": "^4.3.0",

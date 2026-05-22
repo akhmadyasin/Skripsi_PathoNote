@@ -318,6 +318,13 @@ export default function SettingsPage() {
               </svg>
               <span>Collections</span>
             </a>
+            <a className={s.navItem} href="/history">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12,8 12,12 15,15"></polyline>
+              </svg>
+              <span>History</span>
+            </a>
             <a className={`${s.navItem} ${s.active}`} href="/settings">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3"></circle>

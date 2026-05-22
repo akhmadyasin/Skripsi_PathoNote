@@ -78,6 +78,9 @@ export default function VoicePanel() {
   const autoSummarizeTimerRef = useRef<any>(null);
   const summarizeInFlightRef = useRef<boolean>(false);
   const lastEmitRef = useRef<number>(0);
+
+  const [role, setRole] = useState<"dokter" | "petugas" | "loading">("loading");
+  const [allowed, setAllowed] = useState(false);
   
   // MODIFIKASI: Tingkatkan interval ke 3000ms (3 detik)
   const MIN_SUMMARY_INTERVAL = 3000; 
@@ -94,6 +97,23 @@ export default function VoicePanel() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user;
+        const userRole = (user?.user_metadata?.role || "dokter").toString().toLowerCase();
+        const normalizedRole = userRole === "petugas" ? "petugas" : "dokter";
+        setRole(normalizedRole);
+        setAllowed(normalizedRole === "dokter");
+      } catch (err) {
+        console.error("[VoicePanel] failed to load user role", err);
+        setRole("dokter");
+        setAllowed(true);
+      }
+    })();
+  }, []);
 
   const scheduleAutoSummarize = (text: string) => {
     // Emit incremental summarize requests as transcript updates, but throttle them
@@ -199,6 +219,11 @@ export default function VoicePanel() {
   }, []);
 
   const handleStartListening = () => {
+    if (!allowed) {
+      showToast("Akses Voice Panel hanya tersedia untuk Dokter.", "error");
+      return;
+    }
+
     if (recognitionRef.current) {
       fullTranscriptRef.current = "";
       lastFinalSummaryRef.current = "";
@@ -258,6 +283,11 @@ export default function VoicePanel() {
   return (
     <>
       <div className="vtt-flex-container">
+        { role === "petugas" && (
+          <div style={{ marginBottom: 14, padding: '14px 18px', background: '#fff1f2', color: '#991b1b', borderRadius: 14, border: '1px solid #fecdd3' }}>
+            Akses Voice Panel dibatasi. Role <strong>Petugas</strong> tidak dapat memulai listening.
+          </div>
+        ) }
         {/* Kolom Kiri */}
         <div className="column transcript-col">
           {/* TAMBAHKAN DIV KOSONG INI SEBAGAI SPACER */}
@@ -291,27 +321,31 @@ export default function VoicePanel() {
               <button
                 id="startBtn"
                 onClick={handleStartListening}
+                disabled={!allowed}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  background: '#f4f6fa',
-                  color: '#2d3748',
+                  background: !allowed ? '#f3f4f6' : '#f4f6fa',
+                  color: !allowed ? '#9ca3af' : '#2d3748',
                   fontWeight: 500,
                   border: '1px solid #d1d9e6',
                   borderRadius: 24,
                   padding: '8px 22px',
                   fontSize: 16,
-                  cursor: 'pointer',
+                  cursor: !allowed ? 'not-allowed' : 'pointer',
                   transition: 'background 0.2s, border 0.2s',
                   boxShadow: 'none',
                   outline: 'none',
                 }}
+                title={role === "loading" ? "Memuat role..." : allowed ? "Mulai listening" : "Voice Panel hanya untuk Dokter"}
                 onMouseOver={e => {
+                  if (!allowed) return;
                   e.currentTarget.style.background = '#e6eaf3';
                   e.currentTarget.style.border = '1.5px solid #bfc9d9';
                 }}
                 onMouseOut={e => {
+                  if (!allowed) return;
                   e.currentTarget.style.background = '#f4f6fa';
                   e.currentTarget.style.border = '1px solid #d1d9e6';
                 }}
@@ -320,7 +354,7 @@ export default function VoicePanel() {
                   <circle cx="10" cy="10" r="10" fill="#b2f5ea"/>
                   <polygon points="8,6 15,10 8,14" fill="#319795"/>
                 </svg>
-                Mulai
+                {role === "loading" ? 'Memuat...' : allowed ? 'Mulai' : 'Akses terbatas'}
               </button>
             ) : (
               <button

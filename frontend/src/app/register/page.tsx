@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm]   = useState("");
+  const [role, setRole]         = useState("dokter");
   const [err, setErr]           = useState<string | null>(null);
   const [info, setInfo]         = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
@@ -31,6 +32,7 @@ export default function RegisterPage() {
           username,
           display_name: username,
           summary_mode: "patologi",
+          role,
         },
         emailRedirectTo: `${location.origin}/login`,
       },
@@ -71,6 +73,16 @@ export default function RegisterPage() {
               required
               autoComplete="username"
             />
+
+            <label>Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              required
+            >
+              <option value="dokter">Dokter</option>
+              <option value="petugas">Petugas</option>
+            </select>
 
             <label>Email</label>
             <input

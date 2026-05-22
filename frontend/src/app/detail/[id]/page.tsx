@@ -196,6 +196,7 @@ export default function DetailPage() {
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
@@ -213,7 +214,13 @@ export default function DetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // share popup
+  // share email modal
+  const [showShareEmailModal, setShowShareEmailModal] = useState(false);
+  const [shareEmailTo, setShareEmailTo] = useState("");
+  const [shareEmailStatus, setShareEmailStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [userId, setUserId] = useState<string>("");
+  const [userName, setUserName] = useState<string>("");
 
 
   useEffect(() => {
@@ -228,6 +235,13 @@ export default function DetailPage() {
       }
       setEmail(session.user.email || "");
       setMeta((session.user.user_metadata as UserMeta) || {});
+      setUserId(session.user.id);
+      setUserName(
+        (session.user.user_metadata as UserMeta)?.display_name ||
+        (session.user.user_metadata as UserMeta)?.username ||
+        session.user.email?.split("@")[0] ||
+        "User"
+      );
       setLoading(false);
     })();
 
@@ -419,6 +433,165 @@ export default function DetailPage() {
     })();
   };
 
+  const getMailtoUrl = (item: PathologyRecord) => {
+    const subject = item.nomor_pa ? `Hasil Patologi PA ${item.nomor_pa}` : 'Hasil Patologi';
+    const body = getReportText(item);
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  const handleShareEmail = () => {
+    if (!detailData) return;
+    setShareEmailTo("");
+    setShareEmailStatus(null);
+    setShowShareEmailModal(true);
+  };
+
+  const closeShareEmailModal = () => {
+    setShowShareEmailModal(false);
+    setShareEmailStatus(null);
+  };
+
+  const handleSendEmail = async () => {
+    if (!detailData) return;
+    
+    if (!shareEmailTo.trim()) {
+      setShareEmailStatus({ type: "error", message: "Email tujuan tidak boleh kosong" });
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(shareEmailTo.trim())) {
+      setShareEmailStatus({ type: "error", message: "Format email tidak valid" });
+      return;
+    }
+
+    setIsSendingEmail(true);
+    setShareEmailStatus(null);
+
+    try {
+      const subject = detailData.nomor_pa ? `Hasil Patologi PA ${detailData.nomor_pa}` : 'Hasil Patologi';
+      const body = getReportText(detailData);
+      
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
+      const apiUrl = `${backendUrl}/api/send-email`;
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to_email: shareEmailTo.trim(),
+          subject: subject,
+          body: body,
+          is_html: false,
+          hasil_patologi_id: detailData.id,
+          petugas_id: userId,
+          nama_petugas: userName,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setShareEmailStatus({ type: "success", message: "Email berhasil dikirim!" });
+        setTimeout(() => {
+          closeShareEmailModal();
+        }, 2000);
+      } else {
+        setShareEmailStatus({ type: "error", message: data.message || "Gagal mengirim email" });
+      }
+    } catch (error) {
+      console.error("Error sending email:", error);
+      setShareEmailStatus({ type: "error", message: "Terjadi kesalahan saat mengirim email" });
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
+  const getReportHtml = (item: PathologyRecord) => {
+    const title = item.nomor_pa ? `Hasil Patologi PA ${item.nomor_pa}` : 'Hasil Patologi';
+    const rows = getReportFieldKeys(item)
+      .map((fieldKey) => `<div><strong>${formatFieldName(fieldKey)}</strong>: ${String(renderFieldValue(item[fieldKey]))}</div>`)
+      .join('');
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${rows}</body></html>`;
+  };
+
+  const handleExportWord = () => {
+    if (!detailData) return;
+    const html = getReportHtml(detailData);
+    const blob = new Blob([html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `transcription-${detailData.id}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = async () => {
+    if (!detailData) return;
+    const jsPDFModule = (await import('jspdf')) as any;
+    const { jsPDF } = jsPDFModule;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const text = getReportText(detailData);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const lineHeight = 7;
+
+    // Header
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    const title = detailData.nomor_pa ? `Hasil Patologi PA ${detailData.nomor_pa}` : 'Hasil Patologi';
+    doc.text(title, pageWidth / 2, margin + 10, { align: 'center' });
+
+    // Content
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    const lines: string[] = doc.splitTextToSize(text, pageWidth - margin * 2);
+    let cursorY = margin + 30;
+
+    lines.forEach((line: string) => {
+      if (cursorY + lineHeight > pageHeight - 80) { // Leave space for signature section
+        doc.addPage();
+        cursorY = margin;
+      }
+      doc.text(line, margin, cursorY);
+      cursorY += lineHeight;
+    });
+
+    // Signature section
+    const signatureY = pageHeight - 60;
+    const leftX = margin + 50;
+    const rightX = pageWidth - margin - 50;
+
+    // Left signature - Asisten Patologi Anatomi
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Asisten Patologi Anatomi', leftX, signatureY, { align: 'center' });
+    doc.setLineWidth(0.5);
+    doc.line(leftX - 40, signatureY + 5, leftX + 40, signatureY + 5);
+
+    // Right signature - Ahli Patologi Anatomi
+    doc.text('Ahli Patologi Anatomi', rightX, signatureY, { align: 'center' });
+    doc.line(rightX - 40, signatureY + 5, rightX + 40, signatureY + 5);
+
+    // Barcode placeholder (dummy) under right signature
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('[BARCODE PLACEHOLDER]', rightX, signatureY + 15, { align: 'center' });
+
+    // Name from login data under right signature
+    const userName = meta.display_name || meta.username || email.split("@")[0] || "User";
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'italic');
+    doc.text(userName, rightX, signatureY + 25, { align: 'center' });
+
+    doc.save(`transcription-${detailData.id}.pdf`);
+  };
+
   const handleExport = () => {
     if (detailData) {
       const content = getReportText(detailData);
@@ -498,6 +671,20 @@ export default function DetailPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showProfileDropdown]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showExportMenu) {
+        const target = event.target as Element;
+        if (!target.closest('.export-menu-wrapper')) {
+          setShowExportMenu(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportMenu]);
+
   if (loading) {
     return (
       <div className={s.app}>
@@ -573,6 +760,13 @@ export default function DetailPage() {
                 <polyline points="12,6 12,12 16,14"></polyline>
               </svg>
               <span>Collections</span>
+            </a>
+            <a href="/history" className={s.navItem}>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12,8 12,12 15,15"></polyline>
+              </svg>
+              <span>History</span>
             </a>
             <a href="/settings" className={s.navItem}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -656,12 +850,17 @@ export default function DetailPage() {
             </div>
 
             <div className={d.headerActions}>
-              <button className={d.actionButton} onClick={() => router.push('/collections')}>
-                Kembali
+              <button className={d.actionButton} onClick={() => router.push('/collections')} title="Kembali" aria-label="Kembali" type="button">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 18l-6-6 6-6"></path>
+                </svg>
               </button>
               {!isEditing ? (
-                <button className={d.actionButton} onClick={startEditing}>
-                  Edit
+                <button className={d.actionButton} onClick={startEditing} title="Edit" aria-label="Edit" type="button">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 20h16"></path>
+                    <path d="M18.5 5.5a2.121 2.121 0 0 1 3 3L9 21l-4 1 1-4L18.5 5.5Z"></path>
+                  </svg>
                 </button>
               ) : (
                 <>
@@ -673,9 +872,82 @@ export default function DetailPage() {
                   </button>
                 </>
               )}
-              <button className={d.actionButton} onClick={handleExport}>
-                Export
+              <button className={d.actionButton} onClick={handleShareEmail} title="Share Email" aria-label="Share Email" type="button">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 7h16v10H4z"></path>
+                  <path d="M4 7l8 6 8-6"></path>
+                </svg>
               </button>
+              <div className="export-menu-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
+                <button
+                  className={d.actionButton}
+                  onClick={() => setShowExportMenu((prev) => !prev)}
+                  type="button"
+                  title="Export"
+                  aria-label="Export"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3v12"></path>
+                    <path d="M8 13l4 4 4-4"></path>
+                    <path d="M6 21h12"></path>
+                  </svg>
+                </button>
+                {showExportMenu && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: '100%',
+                      marginTop: 8,
+                      background: '#fff',
+                      border: '1px solid rgba(0,0,0,0.12)',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
+                      zIndex: 20,
+                      minWidth: 160,
+                    }}
+                  >
+                    <button
+                      className={d.actionButton}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        borderRadius: '8px 8px 0 0',
+                        border: 'none',
+                        background: 'transparent',
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                      }}
+                      type="button"
+                      onClick={() => {
+                        handleExportWord();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      Word
+                    </button>
+                    <button
+                      className={d.actionButton}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        borderRadius: '0 0 8px 8px',
+                        border: 'none',
+                        background: 'transparent',
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                      }}
+                      type="button"
+                      onClick={async () => {
+                        await handleExportPdf();
+                        setShowExportMenu(false);
+                      }}
+                    >
+                      PDF
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -774,6 +1046,132 @@ export default function DetailPage() {
               <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
                 {isSavingProfile ? "Menyimpan..." : "Simpan"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHARE EMAIL MODAL */}
+      {showShareEmailModal && detailData && (
+        <div className={s.profileModalOverlay} onClick={closeShareEmailModal}>
+          <div className={s.profileModal} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '1400px', width: '90%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div className={s.profileModalHeader}>
+              <div>
+                <h2>Kirim Email Hasil Patologi</h2>
+                <p className={s.profileModalNotice}>Preview isi email sebelum mengirim</p>
+              </div>
+              <button className={s.modalClose} onClick={closeShareEmailModal} aria-label="Tutup">×</button>
+            </div>
+
+            <div className={s.profileModalBody} style={{ display: 'flex', gap: '20px', flex: 1, overflowY: 'auto' }}>
+              {/* Preview Section - Left side */}
+              <div style={{ 
+                flex: 1,
+                background: '#f5f5f5', 
+                border: '1px solid #e0e0e0', 
+                borderRadius: '8px', 
+                padding: '16px',
+                minWidth: '0',
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: '#333' }}>📧 Preview Email</h3>
+                
+                <div style={{ background: 'white', border: '1px solid #ddd', borderRadius: '6px', padding: '12px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '0' }}>
+                  <div style={{ marginBottom: '8px' }}>
+                    <strong style={{ fontSize: '12px', color: '#666' }}>Subject:</strong>
+                    <div style={{ fontSize: '14px', color: '#333', marginTop: '4px', wordBreak: 'break-word' }}>
+                      {detailData.nomor_pa ? `Hasil Patologi PA ${detailData.nomor_pa}` : 'Hasil Patologi'}
+                    </div>
+                  </div>
+                  
+                  <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #eee' }} />
+                  
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '0' }}>
+                    <strong style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>Body:</strong>
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: '#555', 
+                      background: '#fafafa',
+                      padding: '10px',
+                      borderRadius: '4px',
+                      flex: 1,
+                      overflowY: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontFamily: 'monospace',
+                      lineHeight: '1.4'
+                    }}>
+                      {getReportText(detailData)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Input Section - Right side */}
+              <div style={{ 
+                width: '300px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+              }}>
+                {/* Email Input */}
+                <div>
+                  <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block', fontSize: '14px' }}>Kirim ke Email:</label>
+                  <input
+                    type="email"
+                    value={shareEmailTo}
+                    onChange={(e) => setShareEmailTo(e.target.value)}
+                    placeholder="example@email.com"
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: '1px solid #ddd',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontFamily: 'inherit',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* Status Messages */}
+                {shareEmailStatus && (
+                  <div style={{
+                    padding: '12px',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    background: shareEmailStatus.type === "error" ? '#ffebee' : '#e8f5e9',
+                    color: shareEmailStatus.type === "error" ? '#c62828' : '#2e7d32',
+                    border: `1px solid ${shareEmailStatus.type === "error" ? '#ef5350' : '#66bb6a'}`,
+                    wordBreak: 'break-word'
+                  }}>
+                    {shareEmailStatus.message}
+                  </div>
+                )}
+
+                {/* Buttons */}
+                <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
+                  <button 
+                    className={s.buttonSecondary} 
+                    onClick={closeShareEmailModal} 
+                    type="button"
+                    style={{ flex: 1 }}
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    className={s.buttonPrimary} 
+                    onClick={handleSendEmail} 
+                    type="button" 
+                    disabled={isSendingEmail || !shareEmailTo.trim()}
+                    style={{ flex: 1 }}
+                  >
+                    {isSendingEmail ? "Mengirim..." : "Kirim Email"}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
