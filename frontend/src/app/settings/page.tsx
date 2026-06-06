@@ -7,6 +7,8 @@ import { supabaseBrowser } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css"; // layout (sidebar/topbar)
 import h from "@/app/styles/settings.module.css";   // style khusus settings
 
+const SIGNATURE_BUCKET = process.env.NEXT_PUBLIC_SUPABASE_SIGNATURE_BUCKET || "signatures";
+
 type UserMeta = {
   username?: string;
   avatar_url?: string;
@@ -80,6 +82,11 @@ export default function SettingsPage() {
 
   // toast
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
+  const [signaturePreview, setSignaturePreview] = useState<string | null>(null);
+  const [isUploadingSignature, setIsUploadingSignature] = useState(false);
+  const [signatureStatus, setSignatureStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -159,7 +166,12 @@ export default function SettingsPage() {
         return;
       }
       setEmail(session.user.email || "");
-      setMeta((session.user.user_metadata as UserMeta) || {});
+      const userMeta = (session.user.user_metadata as UserMeta) || {};
+      setMeta(userMeta);
+      // Load signature preview from metadata
+      if (userMeta.signature_url) {
+        setSignaturePreview(userMeta.signature_url);
+      }
       setLoading(false);
     })();
 
@@ -210,6 +222,97 @@ export default function SettingsPage() {
   const closeProfileModal = () => {
     setShowProfileModal(false);
     setProfileStatus(null);
+  };
+
+  const handleSignatureFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setSignatureStatus({ type: "error", message: "File harus berupa gambar (PNG, JPG, dll)." });
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setSignatureStatus({ type: "error", message: "Ukuran file maksimal 5MB." });
+      return;
+    }
+
+    setSignatureFile(file);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setSignaturePreview(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    setSignatureStatus(null);
+  };
+
+  const uploadSignature = async () => {
+    if (!signatureFile) {
+      setSignatureStatus({ type: "error", message: "Pilih file signature terlebih dahulu." });
+      return;
+    }
+
+    setIsUploadingSignature(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setSignatureStatus({ type: "error", message: "User tidak ditemukan." });
+        setIsUploadingSignature(false);
+        return;
+      }
+
+      // Upload file ke Supabase Storage
+      const fileName = `signature-${user.id}.${signatureFile.name.split('.').pop()}`;
+      const { data, error: uploadError } = await supabase.storage
+        .from(SIGNATURE_BUCKET)
+        .upload(`${user.id}/${fileName}`, signatureFile, { upsert: true });
+
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        const message = uploadError.message || "Gagal upload signature.";
+        setSignatureStatus({
+          type: "error",
+          message: message.includes("Bucket not found")
+            ? `Bucket Supabase Storage "${SIGNATURE_BUCKET}" tidak ditemukan. Buat bucket dengan nama tersebut di dashboard Supabase.`
+            : message,
+        });
+        setIsUploadingSignature(false);
+        return;
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from(SIGNATURE_BUCKET)
+        .getPublicUrl(`${user.id}/${fileName}`);
+
+      // Update user metadata dengan signature URL
+      const { data: updatedUser, error: updateError } = await supabase.auth.updateUser({
+        data: {
+          ...meta,
+          signature_url: publicUrl,
+        },
+      });
+
+      if (updateError) {
+        setSignatureStatus({ type: "error", message: updateError.message });
+        setIsUploadingSignature(false);
+        return;
+      }
+
+      const userMeta = (updatedUser.user?.user_metadata as UserMeta) || {};
+      setMeta(userMeta);
+      setSignatureFile(null);
+      setSignatureStatus({ type: "success", message: "Signature berhasil disimpan!" });
+      showToast("Signature berhasil disimpan!", "success");
+    } catch (error: any) {
+      console.error("Error uploading signature:", error);
+      setSignatureStatus({ type: "error", message: error.message || "Terjadi kesalahan saat upload." });
+    } finally {
+      setIsUploadingSignature(false);
+    }
   };
 
   const saveProfile = async () => {
@@ -547,6 +650,73 @@ export default function SettingsPage() {
           )}
 
           {/* Summary mode moved to registration flow. */}
+
+          {/* Signature Settings */}
+          {matchesQuery("ttd signature tanda tangan") && (
+            <section className={h.section}>
+              <h3>Tanda Tangan (Signature)</h3>
+              <div className={h.item}>
+                <div className={h.info}>
+                  <div className={h.label}>Unggah Tanda Tangan</div>
+                  <div className={h.desc}>Upload scan atau foto tanda tangan Anda untuk ditampilkan di PDF</div>
+                </div>
+                <div className={h.control}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+                    {signaturePreview && (
+                      <div style={{
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        maxWidth: '200px',
+                        backgroundColor: '#f5f5f5',
+                      }}>
+                        <img src={signaturePreview} alt="Signature preview" style={{
+                          maxWidth: '100%',
+                          maxHeight: '100px',
+                          objectFit: 'contain',
+                        }} />
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleSignatureFileChange}
+                      style={{
+                        padding: '8px',
+                        borderRadius: '4px',
+                        border: '1px solid #ddd',
+                      }}
+                    />
+                    <button
+                      onClick={uploadSignature}
+                      disabled={!signatureFile || isUploadingSignature}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: signatureFile && !isUploadingSignature ? '#0070f3' : '#ccc',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: signatureFile && !isUploadingSignature ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {isUploadingSignature ? 'Uploading...' : 'Simpan Signature'}
+                    </button>
+                    {signatureStatus && (
+                      <div style={{
+                        padding: '8px 12px',
+                        borderRadius: '4px',
+                        color: signatureStatus.type === 'error' ? '#c41e3a' : '#0070f3',
+                        backgroundColor: signatureStatus.type === 'error' ? '#ffe0e6' : '#e3f2fd',
+                        fontSize: '14px',
+                      }}>
+                        {signatureStatus.message}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* General Settings */}
           {matchesQuery("umum tema notifikasi simpan riwayat penyimpanan api key") && (

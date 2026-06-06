@@ -1,7 +1,14 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
+
+type UserMeta = {
+  role?: string;
+  [key: string]: unknown;
+};
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -15,120 +22,219 @@ export default function RegisterPage() {
   const [err, setErr]           = useState<string | null>(null);
   const [info, setInfo]         = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
+  const [allowed, setAllowed]   = useState<boolean | null>(null);
+  const [session, setSession]   = useState<{ access_token?: string; user?: { user_metadata?: UserMeta } } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+
+      setSession(session);
+      const userMeta = (session.user.user_metadata as UserMeta) || {};
+      const rawMeta = (session.user.raw_user_meta_data as UserMeta) || {};
+      const userRole = ((userMeta.role as string) || (rawMeta.role as string) || "").toString().toLowerCase();
+      setAllowed(userRole === "superadmin");
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      if (!sess) router.replace("/login");
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [router, supabase]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErr(null); setInfo(null);
+    setErr(null);
+    setInfo(null);
 
-  if (password !== confirm) return setErr("Password confirmation does not match.");
+    if (password !== confirm) {
+      setErr("Password confirmation does not match.");
+      return;
+    }
+
+    if (!session?.access_token) {
+      setErr("Unable to verify your session. Please log in again.");
+      return;
+    }
 
     setLoading(true);
-    // Use only pathologist mode (summary_mode hardcoded to "patologi")
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/create-user`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          email,
+          password,
           username,
           display_name: username,
-          summary_mode: "patologi",
           role,
-        },
-        emailRedirectTo: `${location.origin}/login`,
-      },
-    });
-    setLoading(false);
+        }),
+      });
 
-    // Debug: log Supabase response so we can see whether confirmation email was queued
-    console.debug("supabase.auth.signUp response:", { data, error });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setErr(result?.error || "Failed to create user.");
+        setLoading(false);
+        return;
+      }
 
-    if (error) return setErr(error.message);
-
-    if (!data.session) {
-      // If the server returns info about email confirmation, show it
-      const serverMsg = (data as any)?.user?.confirmation_sent_at ? "Confirmation email should have been sent." : undefined;
-      setInfo(serverMsg || "Registration successful. Please verify your email, then sign in.");
+      setInfo("User has been created successfully.");
+      setUsername("");
+      setEmail("");
+      setPassword("");
+      setConfirm("");
+      setRole("dokter");
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : "Unexpected error when creating user.");
+    } finally {
+      setLoading(false);
     }
-    else router.push("/dashboard");
   };
+
+  if (allowed === null) {
+    return (
+      <div className="auth-container register-form">
+        <div className="form-side">
+          <div className="form-box">
+            <h1>Checking access...</h1>
+            <p>Please wait while we verify your administrator access.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (allowed === false) {
+    return (
+      <div className="auth-container register-form">
+        <div className="form-side">
+          <div className="form-box">
+            <div className="access-denied-icon">⛔</div>
+            <h1>Access Denied</h1>
+            <p style={{ textAlign: 'center', color: '#6b7280', marginBottom: 24, fontSize: 14 }}>
+              This page is reserved for Superadmin accounts only.
+            </p>
+            <p className="muted center">
+              <a href="/login">← Return to login</a>
+            </p>
+          </div>
+        </div>
+        <div className="image-side">
+          <img src="/login.jpg" alt="Admin Area" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-container register-form">
       <div className="form-side">
         <div className="form-box">
-          <h1>Create Account</h1>
-          <p style={{ textAlign:'center', color:'#6b7280', marginBottom:24, fontSize:14 }}>
-            Join us today and start your journey
-          </p>
+          <div className="admin-header">
+            <div className="admin-icon">👤</div>
+            <h1>Create User Account</h1>
+            <p className="admin-subtitle">Add a new user to the system</p>
+          </div>
 
-          {err && <div className="alert error">{err}</div>}
-          {info && <div className="alert success">{info}</div>}
+          {err && <div className="alert error">❌ {err}</div>}
+          {info && <div className="alert success">✓ {info}</div>}
 
           <form onSubmit={onSubmit}>
-            <label>Username</label>
-            <input
-              placeholder="Choose a username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoComplete="username"
-            />
+            <div className="form-group">
+              <label>Full Name / Username *</label>
+              <input
+                placeholder="Enter username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoComplete="username"
+              />
+            </div>
 
-            <label>Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              required
-            >
-              <option value="dokter">Dokter</option>
-              <option value="petugas">Petugas</option>
-            </select>
+            <div className="form-row">
+              <div className="form-group flex-1">
+                <label>Email Address *</label>
+                <input
+                  type="email"
+                  placeholder="user@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              <div className="form-group flex-1">
+                <label>Role *</label>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  required
+                  className="form-select"
+                >
+                  <option value="dokter">👨‍⚕️ Dokter</option>
+                  <option value="petugas">👤 Petugas</option>
+                </select>
+              </div>
+            </div>
 
-            <label>Email</label>
-            <input
-              type="email"
-              placeholder="Enter your email address"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-            />
+            <div className="form-row">
+              <div className="form-group flex-1">
+                <label>Password *</label>
+                <input
+                  type="password"
+                  placeholder="Min. 6 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="form-group flex-1">
+                <label>Confirm Password *</label>
+                <input
+                  type="password"
+                  placeholder="Repeat password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
 
-            <label>Password</label>
-            <input
-              type="password"
-              placeholder="Create a password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-
-            <label>Confirm Password</label>
-            <input
-              type="password"
-              placeholder="Confirm your password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-            />
-
-            <button className="btn primary" type="submit" disabled={loading}>
-              {loading ? "Creating..." : "Create Account"}
+            <button className="btn primary create-btn" type="submit" disabled={loading}>
+              {loading ? (
+                <><span className="spinner"></span> Creating...</>
+              ) : (
+                <><span>➕</span> Create User</>
+              )}
             </button>
           </form>
 
-          <p className="muted center">
-            Already have an account? <a href="/login">Sign in</a>
-          </p>
+          <div className="form-footer">
+            <a href="/dashboard" className="back-link">← Back to Dashboard</a>
+          </div>
         </div>
       </div>
 
       <div className="image-side">
-        <img src="/login.jpg" alt="Register Illustration" />
+        <img src="/login.jpg" alt="Create User" />
       </div>
     </div>
   );

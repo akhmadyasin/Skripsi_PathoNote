@@ -9,8 +9,10 @@ import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
 type UserMeta = {
   username?: string;
+  display_name?: string;
+  role?: string;
   avatar_url?: string;
-  [k: string]: any;
+  [k: string]: unknown;
 };
 
 type RecentSummary = {
@@ -78,9 +80,10 @@ export default function Dashboard() {
         return;
       }
       const userMeta = (session.user.user_metadata as UserMeta) || {};
+      const rawMeta = ((session.user as unknown as { raw_user_meta_data?: UserMeta }).raw_user_meta_data || {}) as UserMeta;
       setEmail(session.user.email || "");
-      setMeta(userMeta);
-      setRole((userMeta.role || "dokter").toString().toLowerCase());
+      setMeta({ ...rawMeta, ...userMeta });
+      setRole(((userMeta.role as string) || (rawMeta.role as string) || "dokter").toString().toLowerCase());
       setProfileName(userMeta.display_name || userMeta.username || "");
       setProfileEmail(session.user.email || "");
       setLoading(false);
@@ -324,6 +327,18 @@ export default function Dashboard() {
           {role === "petugas" && (
             <div style={{ marginBottom: 18, padding: 16, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 14, color: '#92400e' }}>
               Akses Voice Panel dibatasi untuk role <strong>Petugas</strong>. Untuk membuka Voice Panel, gunakan akun dengan role <strong>Dokter</strong>.
+            </div>
+          )}
+          {role === "superadmin" && (
+            <div style={{ marginBottom: 18, padding: 16, background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 14, color: '#1d4ed8' }}>
+              <p style={{ margin: 0, fontWeight: 600 }}>Superadmin control</p>
+              <p style={{ margin: '8px 0 12px', color: '#334155' }}>Create new user accounts from here.</p>
+              <a href="/register" style={{ display: 'inline-block', padding: '10px 16px', background: '#0078d7', color: 'white', borderRadius: 8, textDecoration: 'none', fontWeight: 500, fontSize: 14, transition: 'all 0.3s ease' }}
+                onMouseEnter={(e) => {e.currentTarget.style.background = '#005fa3'; e.currentTarget.style.transform = 'translateY(-2px)';}}
+                onMouseLeave={(e) => {e.currentTarget.style.background = '#0078d7'; e.currentTarget.style.transform = 'translateY(0)';}}
+              >
+                Open Create User Page
+              </a>
             </div>
           )}
           {/* ... (seluruh isi dashboard Anda yang sebelumnya ada di dalam {!listening ? (...)}) ... */}

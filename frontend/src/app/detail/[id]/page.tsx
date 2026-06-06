@@ -105,6 +105,100 @@ function getReportText(item: PathologyRecord) {
     .join('\n');
 }
 
+const ADMINISTRATION_FIELDS: string[] = [
+  'nomor_pa',
+  'kunjungan',
+  'tanggal',
+  'waktu',
+  'id_simgos',
+  'oleh',
+  'asisten',
+  'dokter',
+  'status',
+  'status_data',
+  'status_pengiriman',
+  'created_at',
+];
+
+const TYPE_FIELDS: string[] = [
+  'jenis_pemeriksaan',
+  'pa_sebelumnya',
+  'jaringan',
+  'lokasi',
+  'topography',
+  'morphology',
+  'grade',
+  'perilaku_tumor',
+  'didapat_dengan',
+  'cairan_fiksasi',
+  'permintaan_ihc',
+  'imuno_histokimia',
+  'bukan_tumor',
+  'reevolusi',
+  'tanggal_imuno',
+];
+
+const RESULTS_FIELDS: string[] = [
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'makroskopik',
+  'mikroskopik',
+  'kesimpulan',
+];
+
+function buildSectionKeys(item: PathologyRecord, keys: string[]) {
+  return keys.filter((key) => key in item && item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '');
+}
+
+function drawPdfSection(
+  doc: any,
+  title: string,
+  item: PathologyRecord,
+  fieldKeys: string[],
+  x: number,
+  y: number,
+  width: number,
+  pageWidth: number,
+  pageHeight: number,
+  margin: number,
+  lineHeight: number,
+) {
+  const lines: string[] = [];
+  const keys = buildSectionKeys(item, fieldKeys);
+  if (!keys.length) return y;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text(title, x, y);
+  y += lineHeight;
+  doc.setDrawColor(180);
+  doc.setLineWidth(0.35);
+  doc.line(x, y - 2, x + width, y - 2);
+  y += 2;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+
+  keys.forEach((key) => {
+    const label = formatFieldName(key);
+    const value = renderFieldValue(item[key]);
+    const wrapped = doc.splitTextToSize(`${label}: ${value}`, width);
+
+    wrapped.forEach((line: string) => {
+      if (y + lineHeight > pageHeight - margin - 40) {
+        doc.addPage();
+        y = margin;
+      }
+      doc.text(line, x, y);
+      y += lineHeight;
+    });
+
+    y += 2;
+  });
+
+  return y;
+}
+
 function formatItemDate(item: PathologyRecord) {
   if (item.tanggal) {
     return `${item.tanggal}${item.waktu ? ` | ${item.waktu}` : ''}`;
@@ -196,7 +290,6 @@ export default function DetailPage() {
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
@@ -516,26 +609,68 @@ export default function DetailPage() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${rows}</body></html>`;
   };
 
-  const handleExportWord = () => {
-    if (!detailData) return;
-    const html = getReportHtml(detailData);
-    const blob = new Blob([html], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `transcription-${detailData.id}.doc`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const loadImageDataUrl = async (url: string): Promise<string | null> => {
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result;
+          resolve(typeof result === 'string' ? result : null);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error('Error loading signature image:', error);
+      return null;
+    }
+  };
+
+  const fetchUserMetaById = async (userId: string): Promise<UserMeta | null> => {
+    if (!userId) return null;
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
+      const response = await fetch(`${backendUrl}/api/user-meta/${encodeURIComponent(userId)}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.user_metadata || data?.raw_user_meta_data || null;
+    } catch (error) {
+      console.error('Error fetching user metadata:', error);
+      return null;
+    }
   };
 
   const handleExportPdf = async () => {
     if (!detailData) return;
+
+    // Refresh metadata before export, so updated signature_url is used
+    let currentUserMeta: UserMeta = {};
+    let currentUserId = '';
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      currentUserId = user?.id || '';
+      currentUserMeta = (user?.user_metadata as UserMeta) || {};
+      setMeta(currentUserMeta);
+    } catch {
+      // ignore refresh errors
+    }
+
+    let doctorMeta: UserMeta | null = null;
+    if (detailData.user_id && detailData.user_id !== currentUserId) {
+      doctorMeta = await fetchUserMetaById(detailData.user_id);
+    }
+    if (!doctorMeta) {
+      doctorMeta = currentUserMeta;
+    }
+
+    const petugasMeta = currentUserId && currentUserId !== detailData.user_id ? currentUserMeta : null;
+
     const jsPDFModule = (await import('jspdf')) as any;
     const { jsPDF } = jsPDFModule;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const text = getReportText(detailData);
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 10;
@@ -544,50 +679,155 @@ export default function DetailPage() {
     // Header
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    const title = detailData.nomor_pa ? `Hasil Patologi PA ${detailData.nomor_pa}` : 'Hasil Patologi';
+    const title = 'Hasil Pemeriksaan Hispatologi';
     doc.text(title, pageWidth / 2, margin + 10, { align: 'center' });
 
     // Content
-    doc.setFontSize(12);
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
-    const lines: string[] = doc.splitTextToSize(text, pageWidth - margin * 2);
     let cursorY = margin + 30;
+    const contentWidth = pageWidth - margin * 2;
+    const sectionGap = 8;
+    const columnWidth = (contentWidth - sectionGap) / 2;
 
-    lines.forEach((line: string) => {
-      if (cursorY + lineHeight > pageHeight - 80) { // Leave space for signature section
-        doc.addPage();
-        cursorY = margin;
-      }
-      doc.text(line, margin, cursorY);
-      cursorY += lineHeight;
-    });
+    const leftEndY = drawPdfSection(
+      doc,
+      'Administrasi',
+      detailData,
+      ADMINISTRATION_FIELDS,
+      margin,
+      cursorY,
+      columnWidth,
+      pageWidth,
+      pageHeight,
+      margin,
+      lineHeight,
+    );
+    const rightEndY = drawPdfSection(
+      doc,
+      'Pemeriksaan',
+      detailData,
+      TYPE_FIELDS,
+      margin + columnWidth + sectionGap,
+      cursorY,
+      columnWidth,
+      pageWidth,
+      pageHeight,
+      margin,
+      lineHeight,
+    );
+
+    cursorY = Math.max(leftEndY, rightEndY) + 10;
+    if (cursorY > pageHeight - margin - 70) {
+      doc.addPage();
+      cursorY = margin;
+    }
+
+    cursorY = drawPdfSection(
+      doc,
+      'Hasil',
+      detailData,
+      RESULTS_FIELDS,
+      margin,
+      cursorY,
+      contentWidth,
+      pageWidth,
+      pageHeight,
+      margin,
+      lineHeight,
+    );
 
     // Signature section
-    const signatureY = pageHeight - 60;
     const leftX = margin + 50;
     const rightX = pageWidth - margin - 50;
+    const signatureLabelY = pageHeight - 72;
+    const signatureImageY = pageHeight - 60;
+    const signatureLineY = pageHeight - 40;
+    const signatureNameY = pageHeight - 20;
+    const signatureImageWidth = 80;
+    const signatureImageHeight = 22;
+    const role = ((meta.role || 'dokter') as string).toLowerCase() === 'petugas' ? 'petugas' : 'dokter';
 
-    // Left signature - Asisten Patologi Anatomi
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.text('Asisten Patologi Anatomi', leftX, signatureY, { align: 'center' });
+    doc.text('Asisten Patologi Anatomi', leftX, signatureLabelY, { align: 'center' });
+    doc.text('Ahli Patologi Anatomi', rightX, signatureLabelY, { align: 'center' });
     doc.setLineWidth(0.5);
-    doc.line(leftX - 40, signatureY + 5, leftX + 40, signatureY + 5);
 
-    // Right signature - Ahli Patologi Anatomi
-    doc.text('Ahli Patologi Anatomi', rightX, signatureY, { align: 'center' });
-    doc.line(rightX - 40, signatureY + 5, rightX + 40, signatureY + 5);
+    const doctorSignatureUrl = doctorMeta?.signature_url;
+    const doctorSignatureDataUrl = doctorSignatureUrl ? await loadImageDataUrl(doctorSignatureUrl) : null;
+    const doctorName = doctorMeta?.display_name || doctorMeta?.username || 'Ahli Patologi';
 
-    // Barcode placeholder (dummy) under right signature
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('[BARCODE PLACEHOLDER]', rightX, signatureY + 15, { align: 'center' });
+    const petugasSignatureUrl = petugasMeta?.signature_url;
+    const petugasSignatureDataUrl = petugasSignatureUrl ? await loadImageDataUrl(petugasSignatureUrl) : null;
+    const petugasName = petugasMeta?.display_name || petugasMeta?.username || 'Asisten Patologi';
 
-    // Name from login data under right signature
-    const userName = meta.display_name || meta.username || email.split("@")[0] || "User";
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'italic');
-    doc.text(userName, rightX, signatureY + 25, { align: 'center' });
+    if (petugasMeta) {
+      if (petugasSignatureDataUrl) {
+        try {
+          doc.addImage(
+            petugasSignatureDataUrl,
+            'PNG',
+            leftX - signatureImageWidth / 2,
+            signatureImageY,
+            signatureImageWidth,
+            signatureImageHeight,
+          );
+          doc.line(leftX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, leftX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
+        } catch (error) {
+          console.error('Error adding petugas signature image:', error);
+          doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
+        }
+      } else {
+        doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
+      }
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'italic');
+      doc.text(petugasName, leftX, signatureNameY, { align: 'center' });
+
+      if (doctorSignatureDataUrl) {
+        try {
+          doc.addImage(
+            doctorSignatureDataUrl,
+            'PNG',
+            rightX - signatureImageWidth / 2,
+            signatureImageY,
+            signatureImageWidth,
+            signatureImageHeight,
+          );
+          doc.line(rightX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, rightX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
+        } catch (error) {
+          console.error('Error adding doctor signature image:', error);
+          doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
+        }
+      } else {
+        doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
+      }
+      doc.text(doctorName, rightX, signatureNameY, { align: 'center' });
+    } else {
+      doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
+      if (doctorSignatureDataUrl) {
+        try {
+          doc.addImage(
+            doctorSignatureDataUrl,
+            'PNG',
+            rightX - signatureImageWidth / 2,
+            signatureImageY,
+            signatureImageWidth,
+            signatureImageHeight,
+          );
+          doc.line(rightX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, rightX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
+        } catch (error) {
+          console.error('Error adding doctor signature image:', error);
+          doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
+        }
+      } else {
+        doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
+      }
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'italic');
+      doc.text(doctorName, rightX, signatureNameY, { align: 'center' });
+    }
 
     doc.save(`transcription-${detailData.id}.pdf`);
   };
@@ -670,20 +910,6 @@ export default function DetailPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showProfileDropdown]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (showExportMenu) {
-        const target = event.target as Element;
-        if (!target.closest('.export-menu-wrapper')) {
-          setShowExportMenu(false);
-        }
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showExportMenu]);
 
   if (loading) {
     return (
@@ -878,76 +1104,19 @@ export default function DetailPage() {
                   <path d="M4 7l8 6 8-6"></path>
                 </svg>
               </button>
-              <div className="export-menu-wrapper" style={{ position: 'relative', display: 'inline-flex' }}>
-                <button
-                  className={d.actionButton}
-                  onClick={() => setShowExportMenu((prev) => !prev)}
-                  type="button"
-                  title="Export"
-                  aria-label="Export"
-                >
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 3v12"></path>
-                    <path d="M8 13l4 4 4-4"></path>
-                    <path d="M6 21h12"></path>
-                  </svg>
-                </button>
-                {showExportMenu && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: '100%',
-                      marginTop: 8,
-                      background: '#fff',
-                      border: '1px solid rgba(0,0,0,0.12)',
-                      borderRadius: 8,
-                      boxShadow: '0 10px 24px rgba(0,0,0,0.16)',
-                      zIndex: 20,
-                      minWidth: 160,
-                    }}
-                  >
-                    <button
-                      className={d.actionButton}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        borderRadius: '8px 8px 0 0',
-                        border: 'none',
-                        background: 'transparent',
-                        textAlign: 'left',
-                        padding: '10px 14px',
-                      }}
-                      type="button"
-                      onClick={() => {
-                        handleExportWord();
-                        setShowExportMenu(false);
-                      }}
-                    >
-                      Word
-                    </button>
-                    <button
-                      className={d.actionButton}
-                      style={{
-                        display: 'block',
-                        width: '100%',
-                        borderRadius: '0 0 8px 8px',
-                        border: 'none',
-                        background: 'transparent',
-                        textAlign: 'left',
-                        padding: '10px 14px',
-                      }}
-                      type="button"
-                      onClick={async () => {
-                        await handleExportPdf();
-                        setShowExportMenu(false);
-                      }}
-                    >
-                      PDF
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                className={d.actionButton}
+                onClick={async () => await handleExportPdf()}
+                type="button"
+                title="Export PDF"
+                aria-label="Export PDF"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v12"></path>
+                  <path d="M8 13l4 4 4-4"></path>
+                  <path d="M6 21h12"></path>
+                </svg>
+              </button>
             </div>
           </div>
 

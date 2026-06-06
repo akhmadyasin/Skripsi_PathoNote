@@ -28,8 +28,8 @@ export default function LoginPage() {
       return;
     }
 
-    // Ambil user & role setelah sign-in
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
+    // Verify session after sign-in
+    const { error: userErr } = await supabase.auth.getUser();
     if (userErr) {
       setErr(userErr.message);
       return;
@@ -137,7 +137,7 @@ export default function LoginPage() {
           </button>
 
           <p className="muted center">
-            Don't have an account? <a href="/register">Sign up now</a>
+            Account creation is restricted. Please ask your Superadmin to create a user for you.
           </p>
         </div>
       </div>

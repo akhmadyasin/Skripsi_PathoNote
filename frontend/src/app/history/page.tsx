@@ -99,10 +99,12 @@ export default function HistoryPage() {
     const normalized = typeof status === "string" ? status.toLowerCase() : String(status || "");
     switch (normalized) {
       case "success":
+      case "terkirim":
         return "#10b981"; // green
       case "failed":
         return "#ef4444"; // red
       case "pending":
+      case "draft":
         return "#f59e0b"; // amber
       default:
         return "#6b7280"; // gray
@@ -113,11 +115,13 @@ export default function HistoryPage() {
     const normalized = typeof status === "string" ? status.toLowerCase() : String(status || "");
     switch (normalized) {
       case "success":
-        return "Berhasil";
+      case "terkirim":
+        return "Terkirim";
       case "failed":
         return "Gagal";
       case "pending":
-        return "Menunggu";
+      case "draft":
+        return "Draft";
       default:
         return status === null || status === undefined ? "-" : String(status);
     }

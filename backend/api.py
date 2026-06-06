@@ -3,9 +3,12 @@ import os
 import time
 import re
 import uuid
+import json
 import traceback
 from threading import Event
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
@@ -217,6 +220,157 @@ def log_pengiriman_history(hasil_patologi_id: str, petugas_id: str, nama_petugas
         print(f"[log_pengiriman_history] Error: {type(e).__name__}: {e}")
         traceback.print_exc()
         return False
+
+def get_user_from_access_token(access_token: str):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        raise Exception("Supabase settings are not configured.")
+
+    url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/user"
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {access_token}",
+    }
+    request_obj = Request(url, headers=headers, method="GET")
+    with urlopen(request_obj) as response:
+        return json.load(response)
+
+@app.route('/api/admin/create-user', methods=['POST'])
+def create_user_admin():
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"error": "Access token is required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[create_user_admin] Error verifying current user: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to verify current user."}), 500
+
+    user_meta = current_user.get('user_metadata') or {}
+    raw_meta = current_user.get('raw_user_meta_data') or {}
+    current_role = (user_meta.get('role') or raw_meta.get('role') or '').lower()
+    if current_role != 'superadmin':
+        return jsonify({"error": "Only superadmin users may create new accounts."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    email = (payload.get('email') or '').strip().lower()
+    password = payload.get('password') or ''
+    username = (payload.get('username') or '').strip()
+    display_name = (payload.get('display_name') or username).strip()
+    new_role = (payload.get('role') or '').strip().lower() if isinstance(payload.get('role'), str) else ''
+
+    if not email or not password or not username or not new_role:
+        return jsonify({"error": "email, password, username, and role are required."}), 400
+
+    if new_role not in {'dokter', 'petugas'}:
+        return jsonify({"error": "role must be either 'dokter' or 'petugas'."}), 400
+
+    try:
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users"
+        body = {
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            "user_metadata": {
+                "username": username,
+                "display_name": display_name,
+                "summary_mode": "patologi",
+                "role": new_role,
+            },
+            "raw_user_meta_data": {
+                "username": username,
+                "display_name": display_name,
+                "summary_mode": "patologi",
+                "role": new_role,
+            },
+        }
+        headers = {
+            "apiKey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+        }
+        request_obj = Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method='POST')
+        with urlopen(request_obj) as response:
+            created_user = json.load(response)
+
+        return jsonify({
+            "success": True,
+            "user": {
+                "id": created_user.get('id'),
+                "email": created_user.get('email'),
+                "user_metadata": created_user.get('user_metadata') or {},
+                "raw_user_meta_data": created_user.get('raw_user_meta_data') or {},
+            }
+        })
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[create_user_admin] Unexpected error: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to create the user."}), 500
+
+@app.route('/api/user-meta/<user_id>', methods=['GET'])
+def get_user_meta(user_id):
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    try:
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{user_id}"
+        headers = {
+            "apiKey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+        }
+        request_obj = Request(url, headers=headers, method='GET')
+        with urlopen(request_obj) as response:
+            data = json.load(response)
+
+        return jsonify({
+            "id": data.get("id"),
+            "email": data.get("email"),
+            "user_metadata": data.get("user_metadata") or {},
+            "raw_user_meta_data": data.get("raw_user_meta_data") or {},
+        })
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[get_user_meta] Unexpected error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to retrieve user metadata."}), 500
 
 @app.route('/process-report', methods=['POST'])
 def process_report():

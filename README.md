@@ -53,6 +53,7 @@ cp .env.example .env.local
 ```
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+NEXT_PUBLIC_SUPABASE_SIGNATURE_BUCKET=signatures
 ```
 
 5. Run the development server:
