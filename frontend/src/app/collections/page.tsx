@@ -671,6 +671,10 @@ export default function CollectionsPage() {
                   placeholder="Email"
                 />
               </label>
+              <label className={s.formRow}>
+                <span>Role</span>
+                <input type="text" value={(meta.role as string) || userRole || 'dokter'} readOnly disabled />
+              </label>
             </div>
 
             {profileStatus && (

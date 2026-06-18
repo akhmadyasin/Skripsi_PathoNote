@@ -609,6 +609,37 @@ export default function DetailPage() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1>${rows}</body></html>`;
   };
 
+  const getImageDimensions = (dataUrl: string): Promise<{ width: number; height: number } | null> => {
+    return new Promise((resolve) => {
+      const img = new (globalThis as any).Image();
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.onerror = () => {
+        resolve(null);
+      };
+      img.src = dataUrl;
+    });
+  };
+
+  const calculateSignatureImageDimensions = (
+    originalWidth: number,
+    originalHeight: number,
+    maxWidth: number,
+    maxHeight: number,
+  ): { width: number; height: number } => {
+    const aspectRatio = originalWidth / originalHeight;
+    let width = maxWidth;
+    let height = maxWidth / aspectRatio;
+
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = maxHeight * aspectRatio;
+    }
+
+    return { width, height };
+  };
+
   const loadImageDataUrl = async (url: string): Promise<string | null> => {
     try {
       const res = await fetch(url, { mode: 'cors' });
@@ -740,12 +771,13 @@ export default function DetailPage() {
     // Signature section
     const leftX = margin + 50;
     const rightX = pageWidth - margin - 50;
-    const signatureLabelY = pageHeight - 72;
-    const signatureImageY = pageHeight - 60;
-    const signatureLineY = pageHeight - 40;
-    const signatureNameY = pageHeight - 20;
-    const signatureImageWidth = 80;
-    const signatureImageHeight = 22;
+    const signatureLabelY = pageHeight - 74;
+    const signatureImageY = pageHeight - 70;
+    const signatureLineY = pageHeight - 26;
+    const signatureNameY = pageHeight - 14;
+    const maxSignatureWidth = 80;
+    const maxSignatureHeight = 45;
+    const defaultSignatureAspectRatio = 3.5; // typical signature is wider than tall
     const role = ((meta.role || 'dokter') as string).toLowerCase() === 'petugas' ? 'petugas' : 'dokter';
 
     doc.setFontSize(12);
@@ -762,68 +794,92 @@ export default function DetailPage() {
     const petugasSignatureDataUrl = petugasSignatureUrl ? await loadImageDataUrl(petugasSignatureUrl) : null;
     const petugasName = petugasMeta?.display_name || petugasMeta?.username || 'Asisten Patologi';
 
-    if (petugasMeta) {
-      if (petugasSignatureDataUrl) {
+    // Helper function to add signature image with aspect ratio preservation
+    const addSignatureImageToPdf = async (
+      imageDataUrl: string | null,
+      xPos: number,
+      yPos: number,
+      fallbackLineStartX: number,
+      fallbackLineEndX: number,
+      fallbackLineY: number,
+    ) => {
+      if (imageDataUrl) {
         try {
+          // Try to get actual dimensions
+          const dimensions = await getImageDimensions(imageDataUrl);
+          let width = maxSignatureWidth;
+          let height = maxSignatureHeight;
+          
+          if (dimensions && dimensions.width && dimensions.height) {
+            // Calculate based on actual aspect ratio
+            const aspectRatio = dimensions.width / dimensions.height;
+            width = maxSignatureWidth;
+            height = maxSignatureWidth / aspectRatio;
+            
+            if (height > maxSignatureHeight) {
+              height = maxSignatureHeight;
+              width = maxSignatureHeight * aspectRatio;
+            }
+          } else {
+            // Use default aspect ratio if dimensions can't be determined
+            height = maxSignatureHeight;
+            width = maxSignatureHeight * defaultSignatureAspectRatio;
+            if (width > maxSignatureWidth) {
+              width = maxSignatureWidth;
+              height = maxSignatureWidth / defaultSignatureAspectRatio;
+            }
+          }
+          
           doc.addImage(
-            petugasSignatureDataUrl,
+            imageDataUrl,
             'PNG',
-            leftX - signatureImageWidth / 2,
-            signatureImageY,
-            signatureImageWidth,
-            signatureImageHeight,
+            xPos - width / 2,
+            yPos,
+            width,
+            height,
           );
-          doc.line(leftX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, leftX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
+          doc.line(xPos - width / 2, yPos + height + 1, xPos + width / 2, yPos + height + 1);
         } catch (error) {
-          console.error('Error adding petugas signature image:', error);
-          doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
+          console.error('Error adding signature image:', error);
+          doc.line(fallbackLineStartX, fallbackLineY, fallbackLineEndX, fallbackLineY);
         }
       } else {
-        doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
+        doc.line(fallbackLineStartX, fallbackLineY, fallbackLineEndX, fallbackLineY);
       }
+    };
+
+    if (petugasMeta) {
+      await addSignatureImageToPdf(
+        petugasSignatureDataUrl,
+        leftX,
+        signatureImageY,
+        leftX - 40,
+        leftX + 40,
+        signatureLineY,
+      );
       doc.setFontSize(11);
       doc.setFont('helvetica', 'italic');
       doc.text(petugasName, leftX, signatureNameY, { align: 'center' });
 
-      if (doctorSignatureDataUrl) {
-        try {
-          doc.addImage(
-            doctorSignatureDataUrl,
-            'PNG',
-            rightX - signatureImageWidth / 2,
-            signatureImageY,
-            signatureImageWidth,
-            signatureImageHeight,
-          );
-          doc.line(rightX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, rightX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
-        } catch (error) {
-          console.error('Error adding doctor signature image:', error);
-          doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
-        }
-      } else {
-        doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
-      }
+      await addSignatureImageToPdf(
+        doctorSignatureDataUrl,
+        rightX,
+        signatureImageY,
+        rightX - 40,
+        rightX + 40,
+        signatureLineY,
+      );
       doc.text(doctorName, rightX, signatureNameY, { align: 'center' });
     } else {
       doc.line(leftX - 40, signatureLineY, leftX + 40, signatureLineY);
-      if (doctorSignatureDataUrl) {
-        try {
-          doc.addImage(
-            doctorSignatureDataUrl,
-            'PNG',
-            rightX - signatureImageWidth / 2,
-            signatureImageY,
-            signatureImageWidth,
-            signatureImageHeight,
-          );
-          doc.line(rightX - signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2, rightX + signatureImageWidth / 2, signatureImageY + signatureImageHeight + 2);
-        } catch (error) {
-          console.error('Error adding doctor signature image:', error);
-          doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
-        }
-      } else {
-        doc.line(rightX - 40, signatureLineY, rightX + 40, signatureLineY);
-      }
+      await addSignatureImageToPdf(
+        doctorSignatureDataUrl,
+        rightX,
+        signatureImageY,
+        rightX - 40,
+        rightX + 40,
+        signatureLineY,
+      );
       doc.setFontSize(11);
       doc.setFont('helvetica', 'italic');
       doc.text(doctorName, rightX, signatureNameY, { align: 'center' });

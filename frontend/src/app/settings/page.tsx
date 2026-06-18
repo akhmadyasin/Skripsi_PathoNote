@@ -894,6 +894,10 @@ export default function SettingsPage() {
                   placeholder="Email"
                 />
               </label>
+              <label className={s.formRow}>
+                <span>Role</span>
+                <input type="text" value={(meta.role as string) || ''} readOnly disabled />
+              </label>
             </div>
 
             {profileStatus && (

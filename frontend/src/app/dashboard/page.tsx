@@ -296,6 +296,10 @@ export default function Dashboard() {
                           placeholder="Email"
                         />
                       </label>
+                      <label className={s.formRow}>
+                        <span>Role</span>
+                        <input type="text" value={(meta.role as string) || role} readOnly disabled />
+                      </label>
                     </div>
 
                     {profileStatus && (

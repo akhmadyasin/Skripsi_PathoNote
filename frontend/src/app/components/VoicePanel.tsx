@@ -203,12 +203,24 @@ export default function VoicePanel() {
       recognition.onend = () => {
         setIsListening(false);
         if (recognitionRef.current && !recognitionRef.current.isManuallyStopped) {
-          try { recognition.start(); } catch {}
+          try {
+            recognition.start();
+          } catch (err) {
+            console.error("SpeechRecognition restart failed:", err);
+          }
         }
       };
-      recognition.onerror = (e: any) => {
-        console.error("SpeechRecognition error:", e.error);
+      recognition.onerror = (event: any) => {
+        const errorCode = event?.error || "unknown";
+        console.error("SpeechRecognition error:", errorCode, event);
         setIsListening(false);
+        if (recognitionRef.current) recognitionRef.current.isManuallyStopped = true;
+
+        const friendlyMessage =
+          errorCode === "network"
+            ? "Gagal memulai pengenalan suara: periksa koneksi jaringan Anda."
+            : `SpeechRecognition error: ${errorCode}`;
+        showToast(friendlyMessage, "error");
       };
       recognitionRef.current = recognition;
     } else {
