@@ -306,6 +306,8 @@ export default function DetailPage() {
   const [editValues, setEditValues] = useState<Partial<PathologyRecord>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSendingToApi, setIsSendingToApi] = useState(false);
+  const [sendApiStatus, setSendApiStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // share email modal
   const [showShareEmailModal, setShowShareEmailModal] = useState(false);
@@ -530,6 +532,49 @@ export default function DetailPage() {
     const subject = item.nomor_pa ? `Hasil Patologi PA ${item.nomor_pa}` : 'Hasil Patologi';
     const body = getReportText(item);
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  };
+
+  const handleSendToApi = async () => {
+    if (!detailData) return;
+
+    setIsSendingToApi(true);
+    setSendApiStatus(null);
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
+      const response = await fetch(`${backendUrl}/api/collections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          collection_id: detailData.id,
+          source: 'detail_page',
+          report_id: detailData.id,
+          hasil_patologi_id: detailData.id,
+          petugas_id: userId || detailData.user_id,
+          nama_petugas: userName || 'System',
+          record: detailData,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || 'Gagal mengirim data ke API');
+      }
+
+      setSendApiStatus({
+        type: 'success',
+        message: data?.message || 'Data berhasil dikirim ke API Anda.',
+      });
+    } catch (error: any) {
+      console.error('Error sending collection to API:', error);
+      setSendApiStatus({
+        type: 'error',
+        message: error?.message || 'Terjadi kesalahan saat mengirim ke API.',
+      });
+    } finally {
+      setIsSendingToApi(false);
+    }
   };
 
   const handleShareEmail = () => {
@@ -1173,12 +1218,31 @@ export default function DetailPage() {
                   <path d="M6 21h12"></path>
                 </svg>
               </button>
+              <button
+                className={d.actionButton}
+                onClick={handleSendToApi}
+                disabled={isSendingToApi}
+                type="button"
+                title="Kirim ke API"
+                aria-label="Kirim ke API"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 17L17 7"></path>
+                  <path d="M7 7h10v10"></path>
+                </svg>
+              </button>
             </div>
           </div>
 
           {saveStatus && (
             <div className={saveStatus.type === 'success' ? d.saveSuccess : d.saveError} style={{ marginBottom: 16 }}>
               {saveStatus.message}
+            </div>
+          )}
+
+          {sendApiStatus && (
+            <div className={sendApiStatus.type === 'success' ? d.saveSuccess : d.saveError} style={{ marginBottom: 16 }}>
+              {sendApiStatus.message}
             </div>
           )}
 

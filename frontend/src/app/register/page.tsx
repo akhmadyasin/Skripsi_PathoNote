@@ -38,7 +38,7 @@ export default function RegisterPage() {
 
       setSession(session);
       const userMeta = (session.user.user_metadata as UserMeta) || {};
-      const rawMeta = (session.user.raw_user_meta_data as UserMeta) || {};
+      const rawMeta = ((session.user as unknown as { raw_user_meta_data?: UserMeta }).raw_user_meta_data || {}) as UserMeta;
       const userRole = ((userMeta.role as string) || (rawMeta.role as string) || "").toString().toLowerCase();
       setAllowed(userRole === "superadmin");
     })();

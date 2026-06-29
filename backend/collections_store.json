@@ -1,0 +1,213 @@
+[
+  {
+    "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+    "created_at": "2026-06-28T01:40:30.308421Z",
+    "updated_at": "2026-06-28T01:40:30.308421Z",
+    "status": "received",
+    "status_message": "Data berhasil diterima oleh API Anda.",
+    "source": "detail_page",
+    "payload": {
+      "collection_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "source": "detail_page",
+      "report_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "hasil_patologi_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "petugas_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e",
+      "nama_petugas": "yasin",
+      "record": {
+        "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+        "created_at": "2026-04-29T02:00:19.872281+00:00",
+        "user_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e",
+        "kunjungan": "AUTO-202604290900",
+        "tanggal": "2026-04-29",
+        "jenis_pemeriksaan": 1,
+        "id_simgos": "layanan.laboratorium.pa.hasil.Model-3",
+        "nomor_pa": "000000",
+        "pa_sebelumnya": "",
+        "asisten": "AI-PathoNote",
+        "dokter": 14,
+        "oleh": 0,
+        "status": 1,
+        "waktu": "09:00:18",
+        "jaringan": "jaringan sedang dari Anus",
+        "lokasi": "Anus",
+        "didapat_dengan": "operasi",
+        "cairan_fiksasi": "Formalin",
+        "diagnosa_klinik": "suspek Hemoroid DD/ Ca",
+        "keterangan_klinik": "",
+        "makroskopik": "jaringan ukuran 1 x 0,5 x 0,2 cm berwarna putih kecoklatan dengan konsistensi Kenyal",
+        "mikroskopik": "sediaan Anus dilapisi sel Epitel Gepeng berlapis yang Ulseratif sebagian. Sel berubah menjadi sel-sel bulat, oval sampai Spindel yang tumbuh Hiperplastis, memadat, berkelompok dengan inti sel Polimorfi dan Hiperkromatis. Mitosis ditemukan disertai stroma Udematus, sel Limfosit dan bercak Perdarahan",
+        "kesimpulan": "Spindel Cell Carcinoma Anus",
+        "permintaan_ihc": "",
+        "topography": "",
+        "morphology": "",
+        "grade": 0,
+        "perilaku_tumor": 0,
+        "imuno_histokimia": "",
+        "bukan_tumor": 1,
+        "reevolusi": "",
+        "reevaluasi": "",
+        "tanggal_imuno": null,
+        "status_pengiriman": "pending"
+      }
+    },
+    "metadata": {
+      "received_via": "POST /api/collections",
+      "can_be_pulled_by_rs": true
+    }
+  },
+  {
+    "id": "history-verify-006",
+    "created_at": "2026-06-28T01:32:27.430752Z",
+    "updated_at": "2026-06-28T01:32:27.430752Z",
+    "status": "received",
+    "status_message": "Data berhasil diterima oleh API Anda.",
+    "source": "manual_test",
+    "payload": {
+      "collection_id": "history-verify-006",
+      "source": "manual_test",
+      "report_id": "history-verify-006",
+      "record": {
+        "id": "history-verify-006",
+        "user_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e"
+      },
+      "nama_petagus": "Tester",
+      "metode_pengiriman": "api",
+      "tujuan_pengiriman": "API RS"
+    },
+    "metadata": {
+      "received_via": "POST /api/collections",
+      "can_be_pulled_by_rs": true
+    }
+  },
+  {
+    "id": "history-debug-002",
+    "created_at": "2026-06-28T01:13:21.169100Z",
+    "updated_at": "2026-06-28T01:13:21.169100Z",
+    "status": "received",
+    "status_message": "Data berhasil diterima oleh API Anda.",
+    "source": "manual_test",
+    "payload": {
+      "collection_id": "history-debug-002",
+      "source": "manual_test",
+      "report_id": "history-debug-002",
+      "record": {
+        "id": "history-debug-002",
+        "user_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e"
+      },
+      "petugas_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e",
+      "nama_petugas": "Tester",
+      "metode_pengiriman": "api",
+      "tujuan_pengiriman": "API RS"
+    },
+    "metadata": {
+      "received_via": "POST /api/collections",
+      "can_be_pulled_by_rs": true
+    }
+  },
+  {
+    "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+    "created_at": "2026-06-28T00:39:04.629614Z",
+    "updated_at": "2026-06-28T00:39:04.629614Z",
+    "status": "received",
+    "status_message": "Data berhasil diterima oleh API Anda.",
+    "source": "detail_page",
+    "payload": {
+      "collection_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "source": "detail_page",
+      "report_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "record": {
+        "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+        "created_at": "2026-04-29T02:00:19.872281+00:00",
+        "user_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e",
+        "kunjungan": "AUTO-202604290900",
+        "tanggal": "2026-04-29",
+        "jenis_pemeriksaan": 1,
+        "id_simgos": "layanan.laboratorium.pa.hasil.Model-3",
+        "nomor_pa": "000000",
+        "pa_sebelumnya": "",
+        "asisten": "AI-PathoNote",
+        "dokter": 14,
+        "oleh": 0,
+        "status": 1,
+        "waktu": "09:00:18",
+        "jaringan": "jaringan sedang dari Anus",
+        "lokasi": "Anus",
+        "didapat_dengan": "operasi",
+        "cairan_fiksasi": "Formalin",
+        "diagnosa_klinik": "suspek Hemoroid DD/ Ca",
+        "keterangan_klinik": "",
+        "makroskopik": "jaringan ukuran 1 x 0,5 x 0,2 cm berwarna putih kecoklatan dengan konsistensi Kenyal",
+        "mikroskopik": "sediaan Anus dilapisi sel Epitel Gepeng berlapis yang Ulseratif sebagian. Sel berubah menjadi sel-sel bulat, oval sampai Spindel yang tumbuh Hiperplastis, memadat, berkelompok dengan inti sel Polimorfi dan Hiperkromatis. Mitosis ditemukan disertai stroma Udematus, sel Limfosit dan bercak Perdarahan",
+        "kesimpulan": "Spindel Cell Carcinoma Anus",
+        "permintaan_ihc": "",
+        "topography": "",
+        "morphology": "",
+        "grade": 0,
+        "perilaku_tumor": 0,
+        "imuno_histokimia": "",
+        "bukan_tumor": 1,
+        "reevolusi": "",
+        "reevaluasi": "",
+        "tanggal_imuno": null,
+        "status_pengiriman": "pending"
+      }
+    },
+    "metadata": {
+      "received_via": "POST /api/collections",
+      "can_be_pulled_by_rs": true
+    }
+  },
+  {
+    "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+    "created_at": "2026-06-28T00:27:58.531990Z",
+    "updated_at": "2026-06-28T00:27:58.531990Z",
+    "status": "received",
+    "status_message": "Data berhasil diterima oleh API Anda.",
+    "source": "detail_page",
+    "payload": {
+      "collection_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "source": "detail_page",
+      "report_id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+      "record": {
+        "id": "54fce045-7605-4ff0-adb5-7f5e2fd27763",
+        "created_at": "2026-04-29T02:00:19.872281+00:00",
+        "user_id": "97531678-26c7-49bb-8ca5-ceb37f75bb8e",
+        "kunjungan": "AUTO-202604290900",
+        "tanggal": "2026-04-29",
+        "jenis_pemeriksaan": 1,
+        "id_simgos": "layanan.laboratorium.pa.hasil.Model-3",
+        "nomor_pa": "000000",
+        "pa_sebelumnya": "",
+        "asisten": "AI-PathoNote",
+        "dokter": 14,
+        "oleh": 0,
+        "status": 1,
+        "waktu": "09:00:18",
+        "jaringan": "jaringan sedang dari Anus",
+        "lokasi": "Anus",
+        "didapat_dengan": "operasi",
+        "cairan_fiksasi": "Formalin",
+        "diagnosa_klinik": "suspek Hemoroid DD/ Ca",
+        "keterangan_klinik": "",
+        "makroskopik": "jaringan ukuran 1 x 0,5 x 0,2 cm berwarna putih kecoklatan dengan konsistensi Kenyal",
+        "mikroskopik": "sediaan Anus dilapisi sel Epitel Gepeng berlapis yang Ulseratif sebagian. Sel berubah menjadi sel-sel bulat, oval sampai Spindel yang tumbuh Hiperplastis, memadat, berkelompok dengan inti sel Polimorfi dan Hiperkromatis. Mitosis ditemukan disertai stroma Udematus, sel Limfosit dan bercak Perdarahan",
+        "kesimpulan": "Spindel Cell Carcinoma Anus",
+        "permintaan_ihc": "",
+        "topography": "",
+        "morphology": "",
+        "grade": 0,
+        "perilaku_tumor": 0,
+        "imuno_histokimia": "",
+        "bukan_tumor": 1,
+        "reevolusi": "",
+        "reevaluasi": "",
+        "tanggal_imuno": null,
+        "status_pengiriman": "pending"
+      }
+    },
+    "metadata": {
+      "received_via": "POST /api/collections",
+      "can_be_pulled_by_rs": true
+    }
+  }
+]

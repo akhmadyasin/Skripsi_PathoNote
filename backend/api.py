@@ -27,8 +27,33 @@ from email.mime.multipart import MIMEMultipart
 # simple in-memory history store (newest first)
 history_store = []
 
+COLLECTIONS_STORE_PATH = os.path.join(os.path.dirname(__file__), "collections_store.json")
+
+
 def _now_iso():
     return datetime.utcnow().isoformat() + "Z"
+
+
+def _load_collections_store() -> list:
+    if not os.path.exists(COLLECTIONS_STORE_PATH):
+        return []
+
+    try:
+        with open(COLLECTIONS_STORE_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, list) else []
+    except Exception as exc:
+        print(f"[collections] Failed to read store: {exc}")
+        return []
+
+
+def _save_collections_store(records: list) -> None:
+    try:
+        with open(COLLECTIONS_STORE_PATH, "w", encoding="utf-8") as handle:
+            json.dump(records, handle, indent=2, ensure_ascii=False)
+    except Exception as exc:
+        print(f"[collections] Failed to write store: {exc}")
+        raise
 
 
 # =========================
@@ -191,33 +216,81 @@ def send_email_smtp(to_email: str, subject: str, body: str, is_html: bool = Fals
         return False, f"Error mengirim email: {str(e)}"
 
 
+def _normalize_history_payload(hasil_patologi_id, petugas_id, nama_petugas, metode, tujuan, status):
+    def _clean_optional_uuid(value):
+        if value is None:
+            return None
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return str(uuid.UUID(text))
+            except ValueError:
+                return None
+        return None
+
+    def _clean_text(value, fallback=None):
+        if value is None:
+            return fallback
+        if isinstance(value, str):
+            text = value.strip()
+            return text or fallback
+        return str(value)
+
+    payload = {
+        "hasil_patologi_id": _clean_optional_uuid(hasil_patologi_id),
+        "petugas_id": _clean_optional_uuid(petugas_id),
+        "nama_petugas": _clean_text(nama_petugas, "System"),
+        "metode_pengiriman": _clean_text(metode, "api"),
+        "tujuan_pengiriman": _clean_text(tujuan, "API RS"),
+        "status": _clean_text(status, "success"),
+    }
+    return payload
+
+
 def log_pengiriman_history(hasil_patologi_id: str, petugas_id: str, nama_petugas: str, 
                            metode: str, tujuan: str, status: str) -> bool:
     """
-    Log pengiriman ke history_pengiriman table
+    Log pengiriman ke history_pengiriman table.
+    If the supplied foreign-key IDs are invalid or absent, retry without them so
+    the history entry still gets stored.
     Returns: success (bool)
     """
     try:
         if not supabase:
             print("[log_pengiriman_history] Supabase not configured")
             return False
-        
-        print(f"[log_pengiriman_history] Logging: {metode} to {tujuan} - {status}")
-        
-        payload = {
-            "hasil_patologi_id": hasil_patologi_id,
-            "petugas_id": petugas_id,
-            "nama_petugas": nama_petugas,
-            "metode_pengiriman": metode,
-            "tujuan_pengiriman": tujuan,
-            "status": status
-        }
-        
+
+        payload = _normalize_history_payload(
+            hasil_patologi_id,
+            petugas_id,
+            nama_petugas,
+            metode,
+            tujuan,
+            status,
+        )
+
+        print(f"[log_pengiriman_history] Logging: {payload['metode_pengiriman']} to {payload['tujuan_pengiriman']} - {payload['status']}")
+
         response = supabase.table("history_pengiriman").insert(payload).execute()
         print(f"[log_pengiriman_history] Successfully logged: {response.data}")
         return True
     except Exception as e:
-        print(f"[log_pengiriman_history] Error: {type(e).__name__}: {e}")
+        error_text = str(e)
+        print(f"[log_pengiriman_history] Error: {type(e).__name__}: {error_text}")
+        if "foreign key" in error_text.lower() or "violat" in error_text.lower():
+            try:
+                fallback_payload = dict(payload)
+                fallback_payload["hasil_patologi_id"] = None
+                fallback_payload["petugas_id"] = None
+                response = supabase.table("history_pengiriman").insert(fallback_payload).execute()
+                print(f"[log_pengiriman_history] Fallback insert succeeded: {response.data}")
+                return True
+            except Exception as fallback_error:
+                print(f"[log_pengiriman_history] Fallback insert failed: {type(fallback_error).__name__}: {fallback_error}")
         traceback.print_exc()
         return False
 
@@ -371,6 +444,118 @@ def get_user_meta(user_id):
         print(f"[get_user_meta] Unexpected error: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to retrieve user metadata."}), 500
+
+@app.route('/api/collections', methods=['POST'])
+def create_collection():
+    payload = request.get_json(silent=True) or {}
+
+    if not payload:
+        return jsonify({"success": False, "error": "Request body cannot be empty."}), 400
+
+    collection_id = str(payload.get("collection_id") or uuid.uuid4())
+    created_at = _now_iso()
+
+    record = {
+        "id": collection_id,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "status": "received",
+        "status_message": "Data berhasil diterima oleh API Anda.",
+        "source": payload.get("source") or "app",
+        "payload": payload,
+        "metadata": {
+            "received_via": "POST /api/collections",
+            "can_be_pulled_by_rs": True,
+        },
+    }
+
+    records = _load_collections_store()
+    records.insert(0, record)
+    _save_collections_store(records)
+
+    try:
+        record_payload = payload.get("record") or {}
+        petugas_id = payload.get("petugas_id") or payload.get("user_id")
+        if petugas_id is not None and not str(petugas_id).strip():
+            petugas_id = None
+
+        log_pengiriman_history(
+            payload.get("report_id") or payload.get("collection_id") or record_payload.get("id"),
+            petugas_id,
+            payload.get("nama_petugas") or record_payload.get("nama_petugas") or "System",
+            payload.get("metode_pengiriman") or "api",
+            payload.get("tujuan_pengiriman") or "API RS",
+            "success",
+        )
+    except Exception as exc:
+        print(f"[collections] Failed to log history: {exc}")
+
+    return jsonify({
+        "success": True,
+        "message": "Collection berhasil disimpan.",
+        "collection": record,
+    }), 201
+
+
+@app.route('/api/collections', methods=['GET'])
+def list_collections():
+    records = _load_collections_store()
+    status_filter = request.args.get("status", "").strip().lower()
+
+    if status_filter:
+        records = [item for item in records if (item.get("status") or "").lower() == status_filter]
+
+    limit = request.args.get("limit", "50")
+    try:
+        limit_value = max(1, min(int(limit), 200))
+    except ValueError:
+        limit_value = 50
+
+    return jsonify({
+        "success": True,
+        "count": len(records[:limit_value]),
+        "collections": records[:limit_value],
+    })
+
+
+@app.route('/api/collections/<collection_id>', methods=['GET'])
+def get_collection_detail(collection_id):
+    records = _load_collections_store()
+    record = next((item for item in records if item.get("id") == collection_id), None)
+
+    if not record:
+        return jsonify({"success": False, "error": "Collection tidak ditemukan."}), 404
+
+    return jsonify({"success": True, "collection": record})
+
+
+@app.route('/api/collections/<collection_id>/status', methods=['PATCH'])
+def update_collection_status(collection_id):
+    payload = request.get_json(silent=True) or {}
+    new_status = (payload.get("status") or "").strip()
+
+    if not new_status:
+        return jsonify({"success": False, "error": "Field 'status' wajib diisi."}), 400
+
+    records = _load_collections_store()
+    record = next((item for item in records if item.get("id") == collection_id), None)
+
+    if not record:
+        return jsonify({"success": False, "error": "Collection tidak ditemukan."}), 404
+
+    record["status"] = new_status
+    record["updated_at"] = _now_iso()
+    record["status_message"] = payload.get("message") or f"Status diperbarui menjadi {new_status}."
+    record.setdefault("history", []).append({
+        "timestamp": _now_iso(),
+        "status": new_status,
+        "message": record["status_message"],
+    })
+
+    _save_collections_store(records)
+
+    return jsonify({"success": True, "message": "Status collection berhasil diperbarui.", "collection": record})
+
 
 @app.route('/process-report', methods=['POST'])
 def process_report():
