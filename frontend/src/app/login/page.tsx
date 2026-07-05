@@ -70,7 +70,7 @@ export default function LoginPage() {
     <div className="auth-container">
       <div className="form-side">
         <div className="form-box">
-          <h1>Welcome Back</h1>
+          <h1>Welcome</h1>
           <p style={{ textAlign:'center', color:'#6b7280', marginBottom:24, fontSize:14 }}>
             Sign in to your account to continue
           </p>

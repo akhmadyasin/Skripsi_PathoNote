@@ -61,7 +61,7 @@ def _save_collections_store(records: list) -> None:
 # =========================
 load_dotenv()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
@@ -134,8 +134,8 @@ Teks: {text}
 JSON:
 """
 
-def call_llama_api(prompt: str) -> str:
-    """Panggil Groq API untuk ekstraksi JSON."""
+def call_ai_api(prompt: str) -> str:
+    """Panggil model AI via Groq API untuk ekstraksi JSON."""
     if not client:
         raise Exception("Groq client not initialized")
     
@@ -147,24 +147,120 @@ def call_llama_api(prompt: str) -> str:
         )
         return response.choices[0].message.content or ""
     except Exception as e:
-        print(f"[call_llama_api] Error: {e}")
+        print(f"[call_ai_api] Error: {e}")
         return ""
 
+def _normalize_json_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(key or "").strip().lower())
+
+
+def _clean_field_value(value: object) -> str:
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"^['\"`]+|['\"`]+$", "", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.replace("(or just \"jaringan\")", "")
+    text = text.replace("(likely", "")
+    text = text.replace("Maybe", "")
+    text = text.replace("I'll just output", "")
+    text = re.sub(r"\s+", " ", text).strip(" .,:;-")
+    return text
+
+
 def extract_json(text: str) -> dict:
-    """Ekstrak JSON dari response AI."""
+    """Ekstrak JSON dari response AI, dengan fallback yang lebih toleran."""
     import json
-    try:
-        # Cari JSON dalam response
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        if start >= 0 and end > start:
-            json_str = text[start:end]
-            return json.loads(json_str)
-    except Exception as e:
-        print(f"[extract_json] Error parsing JSON: {e}")
-    
-    # Fallback: return empty dict
-    return {}
+    if not text:
+        return {}
+
+    candidate = strip_think(text).strip()
+    if not candidate:
+        return {}
+
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE | re.MULTILINE).strip()
+
+    for attempt in [candidate]:
+        if "{" in attempt and "}" in attempt:
+            match = re.search(r"\{.*\}", attempt, flags=re.DOTALL)
+            if match:
+                attempt = match.group(0)
+        try:
+            parsed = json.loads(attempt)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception as e:
+            print(f"[extract_json] parse failed: {e}")
+
+    parsed = {}
+    for line in candidate.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().strip('"').strip("'")
+        value = value.strip().strip('"').strip("'")
+        if key:
+            parsed[key] = value
+
+    return parsed
+
+
+def format_summary_fields(structured_data: dict, raw_text: str | None = None) -> str:
+    """Format output ringkasan dari field JSON, atau fallback ke teks transkrip jika JSON kosong."""
+    field_map = {
+        "jaringan": "JARINGAN",
+        "lokasi": "LOKASI",
+        "didapatdengan": "DIDAPAT_DENGAN",
+        "cairanfiksasi": "CAIRAN_FIKSASI",
+        "diagnosaklinik": "DIAGNOSA_KLINIK",
+        "keteranganklinik": "KETERANGAN_KLINIK",
+        "makroskopik": "MAKROSKOPIK",
+        "mikroskopik": "MIKROSKOPIK",
+        "kesimpulan": "KESIMPULAN",
+    }
+
+    normalized_data: dict[str, str] = {}
+    for raw_key, value in (structured_data or {}).items():
+        normalized_key = _normalize_json_key(raw_key)
+        cleaned_value = _clean_field_value(value)
+        if normalized_key in field_map:
+            normalized_data[field_map[normalized_key]] = cleaned_value
+        elif cleaned_value:
+            normalized_data[str(raw_key)] = cleaned_value
+
+    fields = [
+        ("JARINGAN", normalized_data.get("JARINGAN", "")),
+        ("LOKASI", normalized_data.get("LOKASI", "")),
+        ("DIDAPAT DENGAN", normalized_data.get("DIDAPAT_DENGAN", "")),
+        ("CAIRAN FIKSASI", normalized_data.get("CAIRAN_FIKSASI", "")),
+        ("DIAGNOSA KLINIK", normalized_data.get("DIAGNOSA_KLINIK", "")),
+        ("KETERANGAN KLINIK", normalized_data.get("KETERANGAN_KLINIK", "")),
+        ("MAKROSKOPIK", normalized_data.get("MAKROSKOPIK", "")),
+        ("MIKROSKOPIK", normalized_data.get("MIKROSKOPIK", "")),
+        ("KESIMPULAN", normalized_data.get("KESIMPULAN", "")),
+    ]
+
+    populated_lines = []
+    for label, value in fields:
+        clean_value = _clean_field_value(value)
+        if clean_value:
+            populated_lines.append(f"{label}: {clean_value}")
+
+    if populated_lines:
+        return "\n".join(populated_lines)
+
+    if raw_text:
+        fallback = re.sub(r"\s+", " ", raw_text).strip()
+        if fallback:
+            return fallback[:800] if len(fallback) > 800 else fallback
+
+    return "Ringkasan belum tersedia."
 
 
 # ---------- Helper function untuk mengirim email ----------
@@ -564,7 +660,7 @@ def process_report():
     user_id = data.get('user_id')
     
     # 1. Panggil AI untuk Ekstraksi Medis
-    ai_response = call_llama_api(build_prompt(raw_text))
+    ai_response = call_ai_api(build_prompt(raw_text))
     structured_data = extract_json(ai_response)
 
     # 2. Siapkan Payload Lengkap sesuai Tabel SQL
@@ -753,7 +849,9 @@ def summarize():
                 )
                 summary_raw = (resp.choices[0].message.content or "").strip()
                 summary = strip_think(summary_raw)
-                return jsonify({"summary": summary})
+                structured_data = extract_json(summary)
+                formatted_summary = format_summary_fields(structured_data, text)
+                return jsonify({"summary": formatted_summary})
             except Exception as e:
                 msg = f"{type(e).__name__}: {e}"
                 print("[/summarize] ERROR:", msg)
@@ -1021,7 +1119,9 @@ def handle_summarize_stream(data):
 
         final_raw = "".join(collected).strip()
         final_fmt = strip_think(final_raw)
-        emit("summary_stream", {"final": final_fmt, "end": True})
+        structured_data = extract_json(final_fmt)
+        formatted_summary = format_summary_fields(structured_data, text)
+        emit("summary_stream", {"final": formatted_summary, "end": True})
         print(f"[stream] end SID={sid} tokens={token_count}")
 
     except Exception as e:

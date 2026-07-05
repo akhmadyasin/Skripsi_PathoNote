@@ -67,7 +67,7 @@ function replaceSpokenPunctuation(text: string) {
     .replace(/\btitik koma\b/gi, ";");
 }
 
-export default function VoicePanel() {
+export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const socketRef = useRef<Maybe<Socket>>(null);
   const recognitionRef = useRef<any>(null);
   const summaryEditorRef = useRef<HTMLDivElement>(null);
@@ -90,8 +90,16 @@ export default function VoicePanel() {
 
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [isTranscriptionPaused, setIsTranscriptionPaused] = useState(false);
+  const [hasStartedSession, setHasStartedSession] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("Menyambungkan...");
   const [toast, setToast] = useState<{ msg: string; type: ToastType } | null>(null);
+  const isListeningRef = useRef(false);
+  const isTranscriptionPausedRef = useRef(false);
+  const allowedRef = useRef(false);
+  const roleRef = useRef<"dokter" | "petugas" | "loading">("loading");
+  const lastVoiceCommandRef = useRef("");
+  const lastVoiceCommandAtRef = useRef(0);
   
   const showToast = (msg: string, type: ToastType = "success") => {
     setToast({ msg, type });
@@ -99,51 +107,131 @@ export default function VoicePanel() {
   };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const user = data?.user;
-        const userRole = (user?.user_metadata?.role || "dokter").toString().toLowerCase();
-        const normalizedRole = userRole === "petugas" ? "petugas" : "dokter";
-        setRole(normalizedRole);
-        setAllowed(normalizedRole === "dokter");
-      } catch (err) {
-        console.error("[VoicePanel] failed to load user role", err);
-        setRole("dokter");
-        setAllowed(true);
+    isListeningRef.current = isListening;
+  }, [isListening]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      if (recognitionRef.current) {
+        recognitionRef.current.isManuallyStopped = true;
+        try {
+          recognitionRef.current.stop();
+        } catch {}
       }
-    })();
+      setIsListening(false);
+      setIsTranscriptionPaused(true);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    allowedRef.current = allowed;
+  }, [allowed]);
+
+  useEffect(() => {
+    isTranscriptionPausedRef.current = isTranscriptionPaused;
+  }, [isTranscriptionPaused]);
+
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
+  const handleVoiceCommand = (text: string) => {
+    const cleaned = (text || "")
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, " ");
+
+    if (!cleaned) return false;
+
+    const now = Date.now();
+    if (
+      cleaned === lastVoiceCommandRef.current &&
+      now - lastVoiceCommandAtRef.current < 1500
+    ) {
+      return false;
+    }
+
+    lastVoiceCommandRef.current = cleaned;
+    lastVoiceCommandAtRef.current = now;
+
+    const isStopCommand = /(^|\b)(klik|tekan)?\s*(stop|berhenti|hentikan)\b/.test(cleaned);
+    const isContinueCommand = /(^|\b)(klik|tekan)?\s*(continue|lanjut|lanjutkan)\b/.test(cleaned);
+    const isSaveCommand = /(^|\b)(klik|tekan)?\s*(save|simpan)\b/.test(cleaned);
+
+    const canUseVoiceCommand = roleRef.current !== "petugas";
+
+    if (isStopCommand) {
+      if (!canUseVoiceCommand) {
+        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        return true;
+      }
+      if (isTranscriptionPausedRef.current) {
+        showToast("Transkripsi sudah dijeda. Gunakan Continue atau Save.", "info");
+      } else if (isListeningRef.current) {
+        handleStopListening();
+      } else {
+        showToast("Perekaman sudah berhenti.", "info");
+      }
+      return true;
+    }
+
+    if (isContinueCommand) {
+      if (!canUseVoiceCommand) {
+        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        return true;
+      }
+      if (isListeningRef.current && !isTranscriptionPausedRef.current) {
+        showToast("Perekaman sedang berjalan.", "info");
+      } else {
+        void handleSecondaryAction();
+      }
+      return true;
+    }
+
+    if (isSaveCommand) {
+      if (!canUseVoiceCommand) {
+        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        return true;
+      }
+      const el = summaryEditorRef.current;
+      const summaryText = (el?.textContent || "").trim();
+      if (!summaryText) {
+        showToast("Ringkasan kosong — tidak ada yang disimpan.", "error");
+        return true;
+      }
+      const saveButton = document.getElementById("saveBtn") as HTMLButtonElement | null;
+      saveButton?.click();
+      return true;
+    }
+
+    return false;
+  };
+
+  const refreshUserRole = async () => {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      const userRole = (user?.user_metadata?.role || "dokter").toString().toLowerCase();
+      const normalizedRole = userRole === "petugas" ? "petugas" : "dokter";
+      setRole(normalizedRole);
+      setAllowed(normalizedRole === "dokter");
+      return normalizedRole;
+    } catch (err) {
+      console.error("[VoicePanel] failed to load user role", err);
+      setRole("dokter");
+      setAllowed(true);
+      return "dokter" as const;
+    }
+  };
+
+  useEffect(() => {
+    void refreshUserRole();
   }, []);
 
-  const scheduleAutoSummarize = (text: string) => {
-    // Emit incremental summarize requests as transcript updates, but throttle them
-    const now = Date.now();
-    const next = () => {
-      const currentTranscript = text.trim();
-      
-      // Hitung selisih panjang transkrip dari pemanggilan terakhir
-      const diff = currentTranscript.length - lastTranscriptLengthRef.current;
-      
-      // MODIFIKASI LOGIKA:
-      // Panggil requestSummarize hanya jika:
-      // 1. Transcript cukup panjang (> 10 char)
-      // 2. Ada koneksi socket
-      // 3. Transcript telah bertambah minimal MIN_CHAR_DIFFERENCE (20 karakter)
-      if (currentTranscript.length > 10 && socketRef.current?.connected && diff >= MIN_CHAR_DIFFERENCE) {
-        requestSummarize(currentTranscript, false);
-        // Simpan panjang transkrip saat request berhasil dikirim
-        lastTranscriptLengthRef.current = currentTranscript.length; 
-      }
-      lastEmitRef.current = Date.now();
-    };
-
-    if (autoSummarizeTimerRef.current) clearTimeout(autoSummarizeTimerRef.current);
-    const elapsed = now - (lastEmitRef.current || 0);
-    if (elapsed >= MIN_SUMMARY_INTERVAL) {
-      next();
-    } else {
-      autoSummarizeTimerRef.current = setTimeout(next, MIN_SUMMARY_INTERVAL - elapsed);
-    }
+  const scheduleAutoSummarize = (_text: string) => {
+    // Ringkasan tidak lagi dipicu secara realtime saat transkrip berubah.
+    // Ringkasan hanya dibuat saat pengguna menekan tombol stop.
+    return;
   };
   
   useEffect(() => {
@@ -188,15 +276,21 @@ export default function VoicePanel() {
         let interim = "";
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const chunk = event.results[i][0].transcript || "";
+          const normalizedChunk = replaceSpokenPunctuation(chunk);
           if (event.results[i].isFinal) {
-            fullTranscriptRef.current += replaceSpokenPunctuation(chunk) + " ";
-          } else {
+            handleVoiceCommand(normalizedChunk);
+            if (!isTranscriptionPausedRef.current) {
+              fullTranscriptRef.current += normalizedChunk + " ";
+            }
+          } else if (!isTranscriptionPausedRef.current) {
             interim += chunk;
           }
         }
-        const currentTranscript = fullTranscriptRef.current + interim;
-        setTranscript(currentTranscript);
-        scheduleAutoSummarize(currentTranscript);
+        if (!isTranscriptionPausedRef.current) {
+          const currentTranscript = fullTranscriptRef.current + interim;
+          setTranscript(currentTranscript);
+          scheduleAutoSummarize(currentTranscript);
+        }
       };
       
       recognition.onstart = () => setIsListening(true);
@@ -230,31 +324,100 @@ export default function VoicePanel() {
     return () => { socket.disconnect(); };
   }, []);
 
-  const handleStartListening = () => {
-    if (!allowed) {
+  const clearSessionState = () => {
+    fullTranscriptRef.current = "";
+    lastFinalSummaryRef.current = "";
+    lastTranscriptLengthRef.current = 0;
+    setTranscript("");
+    if (summaryEditorRef.current) summaryEditorRef.current.innerHTML = "";
+    try {
+      localStorage.removeItem("vt2_transcript");
+      localStorage.removeItem(LS_LAST_SUMMARY_KEY);
+    } catch {}
+  };
+
+  const handleStartListening = async (forceRestart = false) => {
+    if (roleRef.current === "loading") {
+      await refreshUserRole();
+    }
+
+    if (roleRef.current !== "dokter") {
       showToast("Akses Voice Panel hanya tersedia untuk Dokter.", "error");
       return;
     }
 
-    if (recognitionRef.current) {
-      fullTranscriptRef.current = "";
-      lastFinalSummaryRef.current = "";
-      lastTranscriptLengthRef.current = 0; // RESET
-      setTranscript("");
-      if (summaryEditorRef.current) summaryEditorRef.current.innerHTML = "";
-      
-      try {
-        recognitionRef.current.isManuallyStopped = false;
-        recognitionRef.current.start();
-      } catch(e) { showToast("Gagal memulai. Coba lagi.", "error"); }
+    const recognitionAlreadyActive = Boolean(isListeningRef.current || recognitionRef.current?.isManuallyStopped === false);
+    setIsTranscriptionPaused(false);
+    setIsListening(true);
+
+    if (!recognitionRef.current) {
+      return;
+    }
+
+    if (recognitionAlreadyActive) {
+      return;
+    }
+
+    const hasExistingTranscript = (fullTranscriptRef.current || "").trim().length > 0;
+    if (forceRestart || !hasExistingTranscript) {
+      clearSessionState();
+    }
+
+    try {
+      recognitionRef.current.isManuallyStopped = false;
+      recognitionRef.current.start();
+    } catch (e: any) {
+      const msg = String(e?.message || e || "");
+      if (!/already started|already active/i.test(msg)) {
+        showToast("Gagal melanjutkan perekaman. Coba lagi.", "error");
+      }
+    }
+  };
+
+  const handleSecondaryAction = async () => {
+    if (isTranscriptionPausedRef.current) {
+      await handleStartListening(false);
+    } else if (isListeningRef.current) {
+      handleStopListening();
+    } else {
+      await handleStartListening(false);
     }
   };
 
   const handleStopListening = () => {
     if (recognitionRef.current) {
       recognitionRef.current.isManuallyStopped = true;
-      recognitionRef.current.stop();
-      setIsListening(false);
+      setIsTranscriptionPaused(true);
+      setIsListening(true);
+
+      const textToSummarize = (fullTranscriptRef.current || "").trim();
+      if (textToSummarize) {
+        requestSummarize(textToSummarize, true);
+      }
+
+      showToast("Transkripsi UI dijeda. Mikrofon tetap aktif sampai Save.", "info");
+    }
+  };
+
+  const handleRestartListening = () => {
+    fullTranscriptRef.current = "";
+    lastFinalSummaryRef.current = "";
+    lastTranscriptLengthRef.current = 0;
+    setTranscript("");
+    if (summaryEditorRef.current) summaryEditorRef.current.innerHTML = "";
+    try {
+      localStorage.removeItem("vt2_transcript");
+      localStorage.removeItem(LS_LAST_SUMMARY_KEY);
+    } catch {}
+
+    if (recognitionRef.current) {
+      recognitionRef.current.isManuallyStopped = false;
+      try {
+        recognitionRef.current.start();
+      } catch (err) {
+        console.error("Failed to restart recognition:", err);
+        showToast("Gagal memulai ulang. Coba lagi.", "error");
+      }
     }
   };
 
@@ -292,6 +455,14 @@ export default function VoicePanel() {
     socketRef.current.emit("summarize_stream", { text });
   };
 
+  const hasExistingTranscript = (fullTranscriptRef.current || "").trim().length > 0 || (transcript || "").trim().length > 0;
+  const secondaryButtonLabel = isTranscriptionPaused ? "Continue" : isListening ? "Stop" : "Continue";
+  const secondaryButtonTitle = isTranscriptionPaused
+    ? "Lanjutkan transkripsi di UI"
+    : isListening
+      ? "Hentikan transkripsi di UI, mikrofon tetap aktif"
+      : "Lanjutkan transkripsi di UI";
+
   return (
     <>
       <div className="vtt-flex-container">
@@ -328,82 +499,97 @@ export default function VoicePanel() {
               {transcript}
             </div>
           </div>
-          <div className="btn-group">
-            {!isListening ? (
-              <button
-                id="startBtn"
-                onClick={handleStartListening}
-                disabled={!allowed}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  background: !allowed ? '#f3f4f6' : '#f4f6fa',
-                  color: !allowed ? '#9ca3af' : '#2d3748',
-                  fontWeight: 500,
-                  border: '1px solid #d1d9e6',
-                  borderRadius: 24,
-                  padding: '8px 22px',
-                  fontSize: 16,
-                  cursor: !allowed ? 'not-allowed' : 'pointer',
-                  transition: 'background 0.2s, border 0.2s',
-                  boxShadow: 'none',
-                  outline: 'none',
-                }}
-                title={role === "loading" ? "Memuat role..." : allowed ? "Mulai listening" : "Voice Panel hanya untuk Dokter"}
-                onMouseOver={e => {
-                  if (!allowed) return;
-                  e.currentTarget.style.background = '#e6eaf3';
-                  e.currentTarget.style.border = '1.5px solid #bfc9d9';
-                }}
-                onMouseOut={e => {
-                  if (!allowed) return;
-                  e.currentTarget.style.background = '#f4f6fa';
-                  e.currentTarget.style.border = '1px solid #d1d9e6';
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: 6}}>
-                  <circle cx="10" cy="10" r="10" fill="#b2f5ea"/>
-                  <polygon points="8,6 15,10 8,14" fill="#319795"/>
-                </svg>
-                {role === "loading" ? 'Memuat...' : allowed ? 'Mulai' : 'Akses terbatas'}
-              </button>
-            ) : (
-              <button
-                id="stopBtn"
-                onClick={handleStopListening}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  background: '#fff5f5',
-                  color: '#c53030',
-                  fontWeight: 500,
-                  border: '1px solid #feb2b2',
-                  borderRadius: 24,
-                  padding: '8px 22px',
-                  fontSize: 16,
-                  cursor: 'pointer',
-                  transition: 'background 0.2s, border 0.2s',
-                  boxShadow: 'none',
-                  outline: 'none',
-                }}
-                onMouseOver={e => {
+          <div className="btn-group" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              id="startBtn"
+              onClick={() => {
+                setHasStartedSession(true);
+                handleStartListening(hasStartedSession);
+              }}
+              disabled={!allowed || isListening}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: !allowed || isListening ? '#f3f4f6' : '#f4f6fa',
+                color: !allowed || isListening ? '#9ca3af' : '#2d3748',
+                fontWeight: 500,
+                border: '1px solid #d1d9e6',
+                borderRadius: 24,
+                padding: '8px 22px',
+                fontSize: 16,
+                cursor: !allowed || isListening ? 'not-allowed' : 'pointer',
+                transition: 'background 0.2s, border 0.2s',
+                boxShadow: 'none',
+                outline: 'none',
+              }}
+              title={role === "loading" ? "Memuat role..." : allowed ? "Mulai perekaman" : "Voice Panel hanya untuk Dokter"}
+              onMouseOver={e => {
+                if (!allowed || isListening) return;
+                e.currentTarget.style.background = '#e6eaf3';
+                e.currentTarget.style.border = '1.5px solid #bfc9d9';
+              }}
+              onMouseOut={e => {
+                if (!allowed || isListening) return;
+                e.currentTarget.style.background = '#f4f6fa';
+                e.currentTarget.style.border = '1px solid #d1d9e6';
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: 6}}>
+                <circle cx="10" cy="10" r="10" fill="#b2f5ea"/>
+                <polygon points="8,6 15,10 8,14" fill="#319795"/>
+              </svg>
+              {role === "loading" ? 'Memuat...' : allowed ? (hasStartedSession ? 'Restart' : 'Start') : 'Akses terbatas'}
+            </button>
+
+            <button
+              id="stopBtn"
+              onClick={() => handleSecondaryAction()}
+              disabled={!allowed}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: !allowed || isListening ? (!allowed ? '#f3f4f6' : '#fff5f5') : '#f4f6fa',
+                color: !allowed || isListening ? (!allowed ? '#9ca3af' : '#c53030') : '#2d3748',
+                fontWeight: 500,
+                border: !allowed || isListening ? (!allowed ? '1px solid #d1d9e6' : '1px solid #feb2b2') : '1px solid #d1d9e6',
+                borderRadius: 24,
+                padding: '8px 22px',
+                fontSize: 16,
+                cursor: !allowed ? 'not-allowed' : 'pointer',
+                transition: 'background 0.2s, border 0.2s',
+                boxShadow: 'none',
+                outline: 'none',
+              }}
+              title={secondaryButtonTitle}
+              onMouseOver={e => {
+                if (!allowed) return;
+                if (isListening) {
                   e.currentTarget.style.background = '#ffe3e3';
                   e.currentTarget.style.border = '1.5px solid #fc8181';
-                }}
-                onMouseOut={e => {
+                } else {
+                  e.currentTarget.style.background = '#e6eaf3';
+                  e.currentTarget.style.border = '1.5px solid #bfc9d9';
+                }
+              }}
+              onMouseOut={e => {
+                if (!allowed) return;
+                if (isListening) {
                   e.currentTarget.style.background = '#fff5f5';
                   e.currentTarget.style.border = '1px solid #feb2b2';
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: 6}}>
-                  <circle cx="10" cy="10" r="10" fill="#feb2b2"/>
-                  <rect x="7" y="7" width="6" height="6" rx="2" fill="#c53030"/>
-                </svg>
-                Stop
-              </button>
-            )}
+                } else {
+                  e.currentTarget.style.background = '#f4f6fa';
+                  e.currentTarget.style.border = '1px solid #d1d9e6';
+                }
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: 6}}>
+                <circle cx="10" cy="10" r="10" fill={isListening ? '#feb2b2' : '#b2f5ea'}/>
+                <rect x="7" y="7" width="6" height="6" rx="2" fill={isListening ? '#c53030' : '#319795'}/>
+              </svg>
+              {secondaryButtonLabel}
+            </button>
           </div>
         </div>
 
@@ -449,6 +635,13 @@ export default function VoicePanel() {
                 e.currentTarget.style.border = '1px solid #d1d9e6';
               }}
               onClick={async () => {
+                if (recognitionRef.current) {
+                  recognitionRef.current.isManuallyStopped = true;
+                  try { recognitionRef.current.stop(); } catch {}
+                }
+                setIsListening(false);
+                setIsTranscriptionPaused(true);
+
                 const el = summaryEditorRef.current;
                 const summaryText = (el?.textContent || "").trim();
                 const original = (fullTranscriptRef.current || "").trim();

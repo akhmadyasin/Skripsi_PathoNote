@@ -132,17 +132,10 @@
 #summaryEditor .hl-add,
 .editor .hl-add {
   display: inline;
-  background: #43ff8e !important;
-  color: #0b3d2e !important;
-  border-radius: 3px;
-  padding: 0 2px;
-  box-shadow: 0 0 0 2px rgba(22,182,182,.25);
-  animation: hlFade 8s ease-out forwards !important;
-}
-
-@keyframes hlFade {
-  0%   { background: #43ff8e; }
-  80%  { background: #43ff8e; }
-  90%  { background: #b6ffd6; }
-  100% { background: transparent; box-shadow: none; }
+  background: transparent !important;
+  color: inherit !important;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  animation: none !important;
 }

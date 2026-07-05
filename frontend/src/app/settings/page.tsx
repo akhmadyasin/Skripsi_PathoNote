@@ -77,7 +77,6 @@ export default function SettingsPage() {
 
   // status
   const [aiStatus, setAiStatus] = useState<"active" | "inactive">("active");
-  const [micStatus, setMicStatus] = useState<"active" | "inactive">("inactive");
   const [storageText, setStorageText] = useState<string>("—");
 
   // toast
@@ -108,14 +107,6 @@ export default function SettingsPage() {
   }, []);
 
   // system checks
-  const checkMic = async () => {
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      setMicStatus("active");
-    } catch {
-      setMicStatus("inactive");
-    }
-  };
   const checkAI = async () => {
     try {
       // Kalau kamu punya API health, ganti ke endpoint kamu:
@@ -142,7 +133,6 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    checkMic();
     checkAI();
     checkStorage();
     const id = setInterval(() => {
@@ -496,322 +486,90 @@ export default function SettingsPage() {
       {/* CONTENT */}
       <main className={s.content}>
         <div className={h.settingsContainer}>
-          <h2>Settings</h2>
+          <div className={h.settingsHeader}>
+            <h2 className={h.pageTitle}>Settings</h2>
+            <p className={h.settingsSubtitle}>Kelola tanda tangan Anda dan cek informasi sistem AI yang sedang digunakan.</p>
+          </div>
 
-          {/* Voice Settings */}
-          {matchesQuery("pengaturan suara bahasa sensitivitas otomatis noise") && (
-            <section className={h.section}>
-              <h3>Voice Settings</h3>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Recognition Language</div>
-                  <div className={h.desc}>Choose the language for voice recognition</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.selectWrap}>
-                    <select id="voiceLanguage" value={settings.voiceLanguage} onChange={onText("voiceLanguage")}>
-                      <option value="id-ID">Bahasa Indonesia</option>
-                      <option value="en-US">English (US)</option>
-                      <option value="en-GB">English (UK)</option>
-                      <option value="ms-MY">Bahasa Malaysia</option>
-                    </select>
-                  </div>
-                </div>
+          <section className={h.section}>
+            <h3 className={h.sectionTitle}>Tanda Tangan</h3>
+            <div className={h.item}>
+              <div className={h.info}>
+                <div className={h.label}>Unggah Tanda Tangan</div>
+                <div className={h.desc}>Upload scan atau foto tanda tangan Anda untuk ditampilkan di PDF.</div>
               </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Microphone Sensitivity</div>
-                  <div className={h.desc}>Adjust how sensitive the system detects voice</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.rangeWrap}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={settings.microphoneSensitivity}
-                      onChange={onRange("microphoneSensitivity")}
-                      className={h.range}
-                    />
-                    <span className={h.rangeValue}>{settings.microphoneSensitivity}%</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Auto Voice Detection</div>
-                  <div className={h.desc}>Start recording automatically when voice is detected</div>
-                </div>
-                <div className={h.control}>
-                  <label className={h.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={settings.autoVoiceDetection}
-                      onChange={onCheck("autoVoiceDetection")}
-                    />
-                    <span className={h.slider} />
-                  </label>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Noise Filter</div>
-                  <div className={h.desc}>Enable filter to reduce background noise</div>
-                </div>
-                <div className={h.control}>
-                  <label className={h.toggle}>
-                    <input type="checkbox" checked={settings.noiseFilter} onChange={onCheck("noiseFilter")} />
-                    <span className={h.slider} />
-                  </label>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* AI Settings */}
-          {matchesQuery("ai model kreativitas ringkasan delay") && (
-            <section className={h.section}>
-              <h3>AI Settings</h3>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>AI Model</div>
-                  <div className={h.desc}>Choose the AI model for text summarization</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.selectWrap}>
-                    <select id="aiModel" value={settings.aiModel} onChange={onText("aiModel")}>
-                      <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Default)</option>
-                      <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
-                      <option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option>
-                      <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>AI Creativity</div>
-                  <div className={h.desc}>Adjust how creative the AI is in summarization</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.rangeWrap}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={settings.aiCreativity}
-                      onChange={onRange("aiCreativity")}
-                      className={h.range}
-                    />
-                    <span className={h.rangeValue}>{settings.aiCreativity}%</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Auto Summarize</div>
-                  <div className={h.desc}>Automatically summarize text when finished speaking</div>
-                </div>
-                <div className={h.control}>
-                  <label className={h.toggle}>
-                    <input type="checkbox" checked={settings.autoSummarize} onChange={onCheck("autoSummarize")} />
-                    <span className={h.slider} />
-                  </label>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Summarize Delay</div>
-                  <div className={h.desc}>Wait seconds before starting to summarize</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.rangeWrap}>
-                    <input
-                      type="range"
-                      min={1}
-                      max={10}
-                      value={settings.summarizeDelay}
-                      onChange={onRange("summarizeDelay")}
-                      className={h.range}
-                    />
-                    <span className={h.rangeValue}>{settings.summarizeDelay}s</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Summary mode moved to registration flow. */}
-
-          {/* Signature Settings */}
-          {matchesQuery("ttd signature tanda tangan") && (
-            <section className={h.section}>
-              <h3>Tanda Tangan (Signature)</h3>
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Unggah Tanda Tangan</div>
-                  <div className={h.desc}>Upload scan atau foto tanda tangan Anda untuk ditampilkan di PDF</div>
-                </div>
-                <div className={h.control}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-                    {signaturePreview && (
-                      <div style={{
-                        border: '1px solid #e0e0e0',
-                        borderRadius: '8px',
-                        padding: '12px',
-                        maxWidth: '200px',
-                        backgroundColor: '#f5f5f5',
-                      }}>
-                        <img src={signaturePreview} alt="Signature preview" style={{
-                          maxWidth: '100%',
-                          maxHeight: '100px',
-                          objectFit: 'contain',
-                        }} />
-                      </div>
-                    )}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleSignatureFileChange}
+              <div className={h.control}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%" }}>
+                  {signaturePreview && (
+                    <div
                       style={{
-                        padding: '8px',
-                        borderRadius: '4px',
-                        border: '1px solid #ddd',
-                      }}
-                    />
-                    <button
-                      onClick={uploadSignature}
-                      disabled={!signatureFile || isUploadingSignature}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: signatureFile && !isUploadingSignature ? '#0070f3' : '#ccc',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: signatureFile && !isUploadingSignature ? 'pointer' : 'not-allowed',
+                        border: "1px solid #e0e0e0",
+                        borderRadius: "8px",
+                        padding: "12px",
+                        maxWidth: "200px",
+                        backgroundColor: "#f5f5f5",
                       }}
                     >
-                      {isUploadingSignature ? 'Uploading...' : 'Simpan Signature'}
-                    </button>
-                    {signatureStatus && (
-                      <div style={{
-                        padding: '8px 12px',
-                        borderRadius: '4px',
-                        color: signatureStatus.type === 'error' ? '#c41e3a' : '#0070f3',
-                        backgroundColor: signatureStatus.type === 'error' ? '#ffe0e6' : '#e3f2fd',
-                        fontSize: '14px',
-                      }}>
-                        {signatureStatus.message}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* General Settings */}
-          {matchesQuery("umum tema notifikasi simpan riwayat penyimpanan api key") && (
-            <section className={h.section}>
-              <h3>General Settings</h3>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Tema Aplikasi</div>
-                  <div className={h.desc}>Pilih tema tampilan aplikasi</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.selectWrap}>
-                    <select id="appTheme" value={settings.appTheme} onChange={onText("appTheme")}>
-                      <option value="dark">Dark (Default)</option>
-                      <option value="light">Light</option>
-                      <option value="auto">Auto (Sesuai Sistem)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Notifikasi Suara</div>
-                  <div className={h.desc}>Putar suara notifikasi saat selesai meringkas</div>
-                </div>
-                <div className={h.control}>
-                  <label className={h.toggle}>
-                    <input type="checkbox" checked={settings.soundNotifications} onChange={onCheck("soundNotifications")} />
-                    <span className={h.slider} />
-                  </label>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Simpan Riwayat</div>
-                  <div className={h.desc}>Otomatis menyimpan riwayat transkrip dan ringkasan</div>
-                </div>
-                <div className={h.control}>
-                  <label className={h.toggle}>
-                    <input type="checkbox" checked={settings.saveHistory} onChange={onCheck("saveHistory")} />
-                    <span className={h.slider} />
-                  </label>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>Durasi Penyimpanan</div>
-                  <div className={h.desc}>Berapa lama riwayat disimpan (hari)</div>
-                </div>
-                <div className={h.control}>
-                  <div className={h.rangeWrap}>
-                    <input
-                      type="range"
-                      min={1}
-                      max={365}
-                      value={settings.historyRetention}
-                      onChange={onRange("historyRetention")}
-                      className={h.range}
-                    />
-                    <span className={h.rangeValue}>{settings.historyRetention} hari</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className={h.item}>
-                <div className={h.info}>
-                  <div className={h.label}>API Key Groq</div>
-                  <div className={h.desc}>Masukkan API key untuk mengakses layanan AI</div>
-                </div>
-                <div className={h.control}>
+                      <img
+                        src={signaturePreview}
+                        alt="Signature preview"
+                        style={{
+                          maxWidth: "100%",
+                          maxHeight: "100px",
+                          objectFit: "contain",
+                        }}
+                      />
+                    </div>
+                  )}
                   <input
-                    type="password"
-                    id="groqApiKey"
-                    className={h.input}
-                    placeholder="Masukkan API key..."
-                    value={settings.groqApiKey}
-                    onChange={onText("groqApiKey")}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleSignatureFileChange}
+                    style={{
+                      padding: "8px",
+                      borderRadius: "4px",
+                      border: "1px solid #ddd",
+                    }}
                   />
+                  <button
+                    onClick={uploadSignature}
+                    disabled={!signatureFile || isUploadingSignature}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: signatureFile && !isUploadingSignature ? "#0070f3" : "#ccc",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: signatureFile && !isUploadingSignature ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {isUploadingSignature ? "Uploading..." : "Simpan Signature"}
+                  </button>
+                  {signatureStatus && (
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: "4px",
+                        color: signatureStatus.type === "error" ? "#c41e3a" : "#0070f3",
+                        backgroundColor: signatureStatus.type === "error" ? "#ffe0e6" : "#e3f2fd",
+                        fontSize: "14px",
+                      }}
+                    >
+                      {signatureStatus.message}
+                    </div>
+                  )}
                 </div>
               </div>
-            </section>
-          )}
+            </div>
+          </section>
 
-          {/* Status */}
           <section className={h.section}>
-            <h3>System Status</h3>
+            <h3 className={h.sectionTitle}>Informasi Sistem</h3>
 
             <div className={h.item}>
               <div className={h.info}>
-                <div className={h.label}>Koneksi AI</div>
-                <div className={h.desc}>Status koneksi ke layanan AI</div>
+                <div className={h.label}>Status Koneksi AI</div>
+                <div className={h.desc}>Status koneksi ke layanan AI saat ini.</div>
               </div>
               <div className={h.control}>
                 <span className={`${h.status} ${aiStatus === "active" ? h.statusActive : h.statusInactive}`}>
@@ -823,36 +581,17 @@ export default function SettingsPage() {
 
             <div className={h.item}>
               <div className={h.info}>
-                <div className={h.label}>Mikrofon</div>
-                <div className={h.desc}>Status akses mikrofon</div>
-              </div>
-              <div className={h.control}>
-                <span className={`${h.status} ${micStatus === "active" ? h.statusActive : h.statusInactive}`}>
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
-                  {micStatus === "active" ? "Tersedia" : "Tidak Tersedia"}
-                </span>
-              </div>
-            </div>
-
-            <div className={h.item}>
-              <div className={h.info}>
-                <div className={h.label}>Penyimpanan Lokal</div>
-                <div className={h.desc}>Ruang penyimpanan yang tersedia</div>
+                <div className={h.label}>Model AI yang Digunakan</div>
+                <div className={h.desc}>Model AI yang saat ini dipakai untuk proses ringkasan.</div>
               </div>
               <div className={h.control}>
                 <span className={`${h.status} ${h.statusActive}`}>
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
-                  {storageText}
+                  {settings.aiModel || "llama-3.3-70b-versatile"}
                 </span>
               </div>
             </div>
           </section>
-
-          {/* Actions */}
-          <div className={h.actionsBar}>
-            <button className={h.btnReset} onClick={reset}>Reset ke Default</button>
-            <button className={h.btnSave} onClick={save}>Simpan Pengaturan</button>
-          </div>
         </div>
       </main>
 

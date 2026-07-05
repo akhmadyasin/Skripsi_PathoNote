@@ -364,7 +364,7 @@ export default function Dashboard() {
         {/* Tampilan Voice Panel */}
         <div className={s.voiceWrap} style={{ display: listening ? 'block' : 'none' }}>
           <div className={s.voiceFrame}>
-            <VoicePanel />
+            <VoicePanel isOpen={listening} />
           </div>
         </div>
       </main>
