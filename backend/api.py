@@ -313,6 +313,9 @@ def send_email_smtp(to_email: str, subject: str, body: str, is_html: bool = Fals
 
 
 def _normalize_history_payload(hasil_patologi_id, petugas_id, nama_petugas, metode, tujuan, status):
+    # Test hook: _normalize_history_payload(...)
+    # - Membersihkan dan menormalisasi payload sebelum disimpan ke `history_pengiriman`.
+    # - Pastikan fallback values (nama_petugas, metode_pengiriman, tujuan_pengiriman, status) ditetapkan.
     def _clean_optional_uuid(value):
         if value is None:
             return None
@@ -329,6 +332,8 @@ def _normalize_history_payload(hasil_patologi_id, petugas_id, nama_petugas, meto
         return None
 
     def _clean_text(value, fallback=None):
+        # Test hook: _clean_text(value, fallback)
+        # - Menghapus whitespace, mengembalikan fallback jika kosong/null.
         if value is None:
             return fallback
         if isinstance(value, str):
@@ -355,6 +360,9 @@ def log_pengiriman_history(hasil_patologi_id: str, petugas_id: str, nama_petugas
     the history entry still gets stored.
     Returns: success (bool)
     """
+    # Test hook: log_pengiriman_history(hasil_patologi_id, petugas_id, nama_petugas, metode, tujuan, status)
+    # - Memastikan entry tersimpan ke Supabase `history_pengiriman`.
+    # - Pada error FK, fungsi mencoba fallback insert tanpa FK.
     try:
         if not supabase:
             print("[log_pengiriman_history] Supabase not configured")

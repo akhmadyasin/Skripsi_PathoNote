@@ -24,6 +24,9 @@ function escapeHtml(s: string) {
     .replace(/"/g, "&quot;");
 }
 
+// Test hook: escapeHtml(s)
+// - Escape teks minimal untuk keamanan HTML.
+
 /** Bold/italic + newline ke HTML sederhana */
 function mdToHtml(text: string) {
   let s = escapeHtml(text || "");
@@ -32,6 +35,9 @@ function mdToHtml(text: string) {
   s = s.replace(/\n/g, "<br>");
   return s;
 }
+
+// Test hook: mdToHtml(text)
+// - Convert markdown-lite to simple HTML (bold, italic, newline).
 
 /** Diff highlight sederhana */
 function renderDiff(
@@ -68,10 +74,16 @@ function renderDiff(
   }, AUTO_CLEAR_HL_MS);
 }
 
+// Test hook: renderDiff(prev, next, el, clearTimerRef)
+// - Menampilkan diff highlight pada elemen editor; fallback ke full render.
+
 function calculateReadingTime(text: string) {
   const wordCount = (text || "").split(/\s+/).filter(Boolean).length;
   return Math.ceil(wordCount / 200);
 }
+
+// Test hook: calculateReadingTime(text)
+// - Menghitung estimasi menit baca berdasarkan jumlah kata.
 
 export function useVoiceEngine() {
   // ====== Refs & State ======
@@ -128,6 +140,9 @@ export function useVoiceEngine() {
     setTimeout(() => setToastVisible(false), 3000);
   }
 
+  // Test hook: showToast(message, type)
+  // - Menampilkan toast singkat di UI; periksa `toastVisible`/`toastMessage`.
+
   // ====== Progress helpers ======
   function showProgress() {
     setProgressVisible(true);
@@ -142,6 +157,8 @@ export function useVoiceEngine() {
       });
     }, 200);
   }
+  // Test hook: showProgress()/hideProgress()/completeProgress()
+  // - Mengelola state progress bar untuk operasi background.
   function hideProgress() {
     setProgressVisible(false);
     setProgress(0);
@@ -170,6 +187,9 @@ export function useVoiceEngine() {
     setCharCount(`${text.length} karakter, ${wordCount} kata, ~${readingTime} menit baca`);
   }
 
+  // Test hook: updateCountDisplay(text)
+  // - Memperbarui ringkasan statistik (charCount) berdasarkan teks.
+
   // ====== Punctuation replacement ======
   function replaceSpokenPunctuation(text: string) {
     return (text || "")
@@ -182,6 +202,9 @@ export function useVoiceEngine() {
       .replace(/\btanda petik\b/gi, '"')
       .replace(/\btanda kurung\b/gi, "(");
   }
+
+  // Test hook: replaceSpokenPunctuation(text)
+  // - Mengganti kata-kata tanda baca terucap menjadi simbol.
 
   // ====== Socket.IO setup ======
   useEffect(() => {
@@ -485,6 +508,9 @@ export function useVoiceEngine() {
     }, 3000);
   }
 
+  // Test hook: requestSummarize(text)
+  // - Mengirim permintaan ringkasan via socket atau fallback HTTP.
+
   function scheduleAutoSummarize(latestText?: string) {
     if (!autoSummarizeEnabledRef.current) return;
     if (autoSummarizeTimerRef.current) {
@@ -497,6 +523,9 @@ export function useVoiceEngine() {
       if (t.length > 10) requestSummarize(t, { showUI: false });
     }, 1200);
   }
+
+  // Test hook: scheduleAutoSummarize(latestText)
+  // - Menjadwalkan auto-summarize saat pengguna berhenti bicara.
 
   // ====== Public handlers untuk UI ======
   function startListening() {
@@ -521,6 +550,9 @@ export function useVoiceEngine() {
     }
   }
 
+  // Test hook: startListening()/stopListening()
+  // - Kontrol lifecycle SpeechRecognition & local transcript cache.
+
   function stopListening() {
     manualStopRef.current = true;
     try {
@@ -532,6 +564,9 @@ export function useVoiceEngine() {
     summarizeInFlightRef.current = false;
     hideProgress();
   }
+
+  // Test hook: addManualTranscript()
+  // - Menambahkan teks manual ke transcript dan menjadwalkan summarization.
 
   function addManualTranscript() {
     const el = manualInputRef.current;
@@ -614,11 +649,17 @@ export function useVoiceEngine() {
     }
   }
 
+  // Test hook: saveSummary()
+  // - Menyimpan ringkasan ke tabel `histories` (Supabase) dan memverifikasi payload.
+
   function onSummaryInput() {
     const el = summaryEditorRef.current;
     const txt = (el?.textContent || "").trim();
     updateCountDisplay(txt);
   }
+
+  // Test hook: onSummaryInput()
+  // - Handler input ringkasan untuk memperbarui statistics/char count.
 
   return {
     // refs yang perlu dipasang ke DOM VoicePanel

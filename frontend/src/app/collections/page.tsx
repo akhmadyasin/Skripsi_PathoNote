@@ -61,6 +61,9 @@ function formatFieldName(key: string) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Test hook: formatFieldName(key)
+// - Mengubah nama field teknis menjadi label yang ramah-tampilan.
+
 function renderFieldValue(value: any) {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -68,17 +71,26 @@ function renderFieldValue(value: any) {
   return String(value);
 }
 
+// Test hook: renderFieldValue(value)
+// - Normalisasi nilai field untuk ditampilkan (stringify, boolean, null handling).
+
 function getReportFieldKeys(item: CollectionItem) {
   const ordered = REPORT_FIELD_ORDER.filter((key) => key in item);
   const otherKeys = Object.keys(item).filter((key) => !ordered.includes(key));
   return [...ordered, ...otherKeys];
 }
 
+// Test hook: getReportFieldKeys(item)
+// - Menghasilkan urutan kunci report yang akan dirender atau diedit.
+
 function getReportText(item: CollectionItem) {
   return getReportFieldKeys(item)
     .map((fieldKey) => `${formatFieldName(fieldKey)}: ${renderFieldValue(item[fieldKey])}`)
     .join('\n');
 }
+
+// Test hook: getReportText(item)
+// - Mengembalikan teks lengkap report (plaintext) yang digunakan untuk share/copy.
 
 function formatItemDate(item: CollectionItem) {
   if (item.tanggal) {
@@ -102,6 +114,9 @@ function formatItemDate(item: CollectionItem) {
   return item.id || '';
 }
 
+// Test hook: formatItemDate(item)
+// - Format tanggal/waktu item untuk tampilan kartu.
+
 function parseJsonSummary(text: string | null | undefined): Record<string, string> | null {
   if (!text) return null;
   const raw = text.trim();
@@ -122,6 +137,9 @@ function parseJsonSummary(text: string | null | undefined): Record<string, strin
   }
   return null;
 }
+
+// Test hook: parseJsonSummary(text)
+// - Mencoba mengekstrak JSON embedded dalam teks ringkasan.
 
 const FIELD_LABELS: Record<string, string> = {
   MAKROSKOPIK: 'Makroskopik',
@@ -172,6 +190,9 @@ function renderStructuredSummary(summary: string | null | undefined) {
   );
 }
 
+// Test hook: renderStructuredSummary(summary)
+// - Mengkonversi ringkasan terstruktur menjadi elemen JSX untuk tampilan.
+
 function decodeJwtPayload(token: string | null | undefined) {
   if (!token) return null;
   try {
@@ -185,11 +206,33 @@ function decodeJwtPayload(token: string | null | undefined) {
   }
 }
 
+// Test hook: decodeJwtPayload(token)
+// - Mendekode payload JWT dari access token untuk mengambil klaim role.
+
 const SAMPLE: CollectionItem[] = [];
 
 export default function CollectionsPage() {
   const router = useRouter();
   const supabase = supabaseBrowser();
+
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
+
+  const [userMetaMap, setUserMetaMap] = useState<Record<string, UserMeta>>({});
+
+  async function fetchUserMetaById(userId: string) {
+    if (!userId) return null;
+    if (userMetaMap[userId]) return userMetaMap[userId];
+    try {
+      const res = await fetch(`${API_BASE}/api/user-meta/${encodeURIComponent(userId)}`);
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => ({}));
+      const meta = data?.user_metadata || data?.raw_user_meta_data || data?.user_metadata || {};
+      setUserMetaMap((m) => ({ ...m, [userId]: meta }));
+      return meta;
+    } catch (e) {
+      return null;
+    }
+  }
 
   // auth/session
   const [loading, setLoading] = useState(true);
@@ -206,6 +249,15 @@ export default function CollectionsPage() {
   
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<CollectionItem[]>(SAMPLE);
+
+  // Preload user metadata for items' owners when items change
+  useEffect(() => {
+    const ids = Array.from(new Set(items.map((it) => it.user_id).filter(Boolean)));
+    ids.forEach((id) => {
+      if (!userMetaMap[id]) void fetchUserMetaById(id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   useEffect(() => {
     let mounted = true;
@@ -592,6 +644,9 @@ export default function CollectionsPage() {
               <div>
                 <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
                   [{it.nomor_pa || 'AUTO'}] - {it.jaringan || it.lokasi || '-'}
+                </div>
+                <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+                  <strong>Oleh:</strong> {userMetaMap[it.user_id]?.username || it.user_id || '-'}
                 </div>
                 <div className={h.summary} style={{ marginBottom: 8 }}>
                   <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}

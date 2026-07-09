@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { io, Socket } from "socket.io-client";
 import { diffWords } from "diff";
-import "@/app/styles/voice.css"; // Pastikan file CSS ini ada dan sesuai
+import "../styles/voice.css";
 
 type ToastType = "success" | "error" | "info";
 type Maybe<T> = T | null;
@@ -26,6 +26,9 @@ function mdToHtml(text: string) {
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     .replace(/\n/g, "<br>");
 }
+
+// Test hook: mdToHtml(text)
+// - Convert markdown-lite to simple HTML for summary rendering.
 
 function renderDiff(prev: string, next: string, el: HTMLElement, clearTimerRef: React.MutableRefObject<any>) {
   if (!el) return;
@@ -57,6 +60,9 @@ function renderDiff(prev: string, next: string, el: HTMLElement, clearTimerRef: 
   // No timer to reset innerHTML, so multiple highlights can overlap
 }
 
+// Test hook: renderDiff(prev, next, el, clearTimerRef)
+// - Apply diff highlight to editor element; verify highlighted segments appear.
+
 function replaceSpokenPunctuation(text: string) {
   return (text || "")
     .replace(/\btitik\b/gi, ".")
@@ -66,6 +72,9 @@ function replaceSpokenPunctuation(text: string) {
     .replace(/\btitik dua\b/gi, ":")
     .replace(/\btitik koma\b/gi, ";");
 }
+
+// Test hook: replaceSpokenPunctuation(text)
+// - Replace spoken punctuation words with corresponding symbols.
 
 export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const socketRef = useRef<Maybe<Socket>>(null);
@@ -207,6 +216,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     return false;
   };
 
+  // Test hook: handleVoiceCommand(text)
+  // - Interpret voice commands like stop/continue/save and trigger UI actions.
+
   const refreshUserRole = async () => {
     try {
       const { data } = await supabase.auth.getUser();
@@ -224,6 +236,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     }
   };
 
+  // Test hook: refreshUserRole()
+  // - Fetch current user role from Supabase and set local role/permission state.
+
   useEffect(() => {
     void refreshUserRole();
   }, []);
@@ -233,6 +248,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     // Ringkasan hanya dibuat saat pengguna menekan tombol stop.
     return;
   };
+
+  // Test hook: scheduleAutoSummarize(text)
+  // - (Disabled) placeholder for scheduling summary generation.
   
   useEffect(() => {
     const socket = io(BACKEND_ORIGIN, { transports: ["websocket"] });
@@ -374,6 +392,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     }
   };
 
+  // Test hook: handleStartListening(forceRestart)
+  // - Start or restart SpeechRecognition session and manage transcript state.
+
   const handleSecondaryAction = async () => {
     if (isTranscriptionPausedRef.current) {
       await handleStartListening(false);
@@ -383,6 +404,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       await handleStartListening(false);
     }
   };
+
+  // Test hook: handleSecondaryAction()
+  // - Toggle between start/stop/continue behavior depending on current state.
 
   const handleStopListening = () => {
     if (recognitionRef.current) {
@@ -398,6 +422,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       showToast("Transkripsi UI dijeda. Mikrofon tetap aktif sampai Save.", "info");
     }
   };
+
+  // Test hook: handleStopListening()
+  // - Pause UI transcription, trigger summary request for accumulated transcript.
 
   const handleRestartListening = () => {
     fullTranscriptRef.current = "";
@@ -421,6 +448,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     }
   };
 
+  // Test hook: handleRestartListening()
+  // - Clear session state and attempt to restart recognition.
+
   const saveToPathology = async (userId: string, text: string) => {
     const response = await fetch(`${BACKEND_ORIGIN}/process-report`, {
       method: "POST",
@@ -434,6 +464,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     }
     return data;
   };
+
+  // Test hook: saveToPathology(userId, text)
+  // - POSTs report text to backend `/process-report` and returns parsed response.
 
   const requestSummarize = (text: string, showUI: boolean = true) => {
     if (!text || !socketRef.current?.connected) return;
@@ -454,6 +487,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     
     socketRef.current.emit("summarize_stream", { text });
   };
+
+  // Test hook: requestSummarize(text, showUI)
+  // - Emit socket event to backend for streaming summarization.
 
   const hasExistingTranscript = (fullTranscriptRef.current || "").trim().length > 0 || (transcript || "").trim().length > 0;
   const secondaryButtonLabel = isTranscriptionPaused ? "Continue" : isListening ? "Stop" : "Continue";

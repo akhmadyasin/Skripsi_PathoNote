@@ -96,6 +96,9 @@ export default function HistoryPage() {
   const avatar = meta.avatar_url || "https://i.pravatar.cc/64?img=12";
 
   const getStatusColor = (status: unknown) => {
+    // Test hook: getStatusColor(status)
+    // - Mengembalikan warna (hex) berdasarkan nilai status untuk tampilan UI.
+    // - Gunakan untuk memverifikasi mapping warna pada status berbeda.
     const normalized = typeof status === "string" ? status.toLowerCase() : String(status || "");
     switch (normalized) {
       case "success":
@@ -112,6 +115,9 @@ export default function HistoryPage() {
   };
 
   const getStatusLabel = (status: unknown) => {
+    // Test hook: getStatusLabel(status)
+    // - Mengembalikan label teks yang ditampilkan untuk status.
+    // - Berguna untuk menguji localisasi/pemetaan status.
     const normalized = typeof status === "string" ? status.toLowerCase() : String(status || "");
     switch (normalized) {
       case "success":
@@ -128,6 +134,9 @@ export default function HistoryPage() {
   };
 
   const formatDate = (dateString?: string) => {
+    // Test hook: formatDate(dateString)
+    // - Format tanggal ISO string ke locale `id-ID` untuk tampilan.
+    // - Input invalid akan dikembalikan apa adanya.
     if (!dateString) return "-";
     try {
       const date = new Date(dateString);
@@ -143,7 +152,21 @@ export default function HistoryPage() {
     }
   };
 
+  const normalizeDestinationLabel = (value: unknown): string => {
+    // Test hook: normalizeDestinationLabel(value)
+    // - Normalisasi label tujuan pengiriman untuk tampilan.
+    // - Memetakan "API RS" -> "Backend API".
+    // - Selalu mengembalikan string.
+    if (typeof value !== "string") return String(value ?? "-");
+    const trimmed = value.trim();
+    if (trimmed === "API RS") return "Backend API";
+    return trimmed || "-";
+  };
+
   const renderReportPreview = (item: PathologyRecord) => {
+    // Test hook: renderReportPreview(item)
+    // - Menghasilkan JSX bagian-bagian hasil patologi (Diagnosa, Makroskopik, dll.)
+    // - Untuk pengujian, cek bahwa bagian yang kosong tidak dirender.
     const parts = [
       { label: "Diagnosa Klinik", value: item.diagnosa_klinik },
       { label: "Keterangan Klinik", value: item.keterangan_klinik },
@@ -161,6 +184,9 @@ export default function HistoryPage() {
   };
 
   const handlePreview = async (record: HistoryRecord) => {
+    // Test hook: handlePreview(record)
+    // - Mengambil data `hasil_patologi` dari Supabase berdasarkan `hasil_patologi_id`.
+    // - Men-set state loading/error/previewRecord; cetak error ke console jika gagal.
     setPreviewError(null);
     setPreviewRecord(null);
     setShowPreviewModal(true);
@@ -197,12 +223,17 @@ export default function HistoryPage() {
   };
 
   const closePreviewModal = () => {
+    // Test hook: closePreviewModal()
+    // - Menutup modal preview dan mereset state terkait.
     setShowPreviewModal(false);
     setPreviewRecord(null);
     setPreviewError(null);
   };
 
   const filteredHistories = useMemo(() => {
+    // Test hook: filteredHistories (useMemo)
+    // - Filter client-side untuk fitur pencarian pada kolom penting.
+    // - Gunakan untuk memastikan hasil pencarian konsisten.
     const search = query.trim().toLowerCase();
     if (!search) return histories;
     return histories.filter((record) =>
@@ -219,6 +250,9 @@ export default function HistoryPage() {
   }, [histories, query]);
 
   const handleDelete = async (id: string) => {
+    // Test hook: handleDelete(id)
+    // - Memanggil endpoint legacy `${API_BASE}/api/history/:id` untuk menghapus.
+    // - Setelah sukses, menghapus entry dari state lokal `histories`.
     if (!confirm("Apakah Anda yakin ingin menghapus record ini?")) return;
 
     try {
@@ -374,7 +408,7 @@ export default function HistoryPage() {
                         </span>
                       </td>
                       <td className={h.truncate} title={record.tujuan_pengiriman}>
-                        {record.tujuan_pengiriman}
+                        {normalizeDestinationLabel(record.tujuan_pengiriman)}
                       </td>
                       <td>
                         <span
@@ -442,7 +476,7 @@ export default function HistoryPage() {
                     </div>
                     <div>
                       <strong>Tujuan</strong>
-                      <p>{previewRecord.tujuan_pengiriman || "-"}</p>
+                      <p>{normalizeDestinationLabel(previewRecord.tujuan_pengiriman)}</p>
                     </div>
                     <div>
                       <strong>Status</strong>

@@ -15,12 +15,21 @@ type UserMeta = {
   [k: string]: unknown;
 };
 
-type RecentSummary = {
+type DashboardStats = {
+  totalRecords: number;
+  pendingTasks: number;
+  completedToday: number;
+};
+
+type DashboardActivityItem = {
   id: string;
   title: string;
   description: string;
-  time: string; // human readable, e.g., "10 minutes ago"
+  time: string;
+  status: string;
 };
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -40,6 +49,8 @@ export default function Dashboard() {
     if (role === "petugas") return;
     setListening((v) => !v);
   };
+  // Test hook: toggleListening()
+  // - Toggle state `listening` kecuali role 'petugas'.
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -47,27 +58,13 @@ export default function Dashboard() {
   const [profileStatus, setProfileStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // recent summaries
-  const [recentSummaries, setRecentSummaries] = useState<RecentSummary[]>([
-    {
-      id: "s1",
-      title: "Client Brief Summary",
-      description: "Latest summarize file opened",
-      time: "10 minutes ago",
-    },
-    {
-      id: "s2",
-      title: "Standup Notes Summary",
-      description: "Yesterday's highlights",
-      time: "25 minutes ago",
-    },
-    {
-      id: "s3",
-      title: "Interview Summary",
-      description: "Key talking points captured",
-      time: "1 hour ago",
-    },
-  ]);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalRecords: 0,
+    pendingTasks: 0,
+    completedToday: 0,
+  });
+  const [activityItems, setActivityItems] = useState<DashboardActivityItem[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -93,18 +90,82 @@ export default function Dashboard() {
       if (!sess) router.replace("/login");
     });
 
-    // load recent summaries from localStorage if available
-    try {
-      const raw = localStorage.getItem("recentSummaries");
-      if (raw) {
-        const parsed = JSON.parse(raw) as RecentSummary[];
-        if (Array.isArray(parsed) && parsed.length) {
-          setRecentSummaries(parsed.slice(0, 4));
+    const loadDashboardData = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/collections?limit=8`);
+        if (!response.ok) {
+          throw new Error("Unable to load dashboard data");
         }
+
+        const result = await response.json() as { collections?: Array<Record<string, unknown>> };
+        const collections = Array.isArray(result?.collections) ? result.collections : [];
+
+        const totalRecords = collections.length;
+        const pendingTasks = collections.filter((item) => {
+          const status = String((item as { status?: string }).status || "").toLowerCase();
+          return status === "received" || status === "pending";
+        }).length;
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const completedToday = collections.filter((item) => {
+          const createdAt = (item as { created_at?: string }).created_at;
+          const createdDate = createdAt ? new Date(createdAt) : null;
+          const status = String((item as { status?: string }).status || "").toLowerCase();
+          return createdDate && createdDate >= todayStart && ["success", "completed", "done", "sent"].includes(status);
+        }).length;
+
+        const activityTemplates = [
+          { title: "Menyimpan dokumen", description: "Catatan berhasil disimpan ke sistem", status: "Selesai" },
+          { title: "Export PDF", description: "Laporan berhasil diekspor dalam format PDF", status: "Selesai" },
+          { title: "Simpan ke API", description: "Data berhasil dikirim ke endpoint integrasi", status: "Terkirim" },
+          { title: "Shared email", description: "Notifikasi email berhasil dikirim ke penerima", status: "Dibagikan" },
+        ];
+
+        const mappedActivities = collections.slice(0, 5).map((item, index) => {
+          const record = (item as { payload?: { record?: Record<string, unknown> }; status_message?: string; created_at?: string; status?: string }).payload?.record || {};
+          const nomorPa = typeof record.nomor_pa === "string" && record.nomor_pa ? record.nomor_pa : `Collection ${index + 1}`;
+          const template = activityTemplates[index % activityTemplates.length];
+          const statusValue = String((item as { status?: string }).status || "received").toLowerCase();
+          const description = `${template.description} untuk ${nomorPa}`;
+          const createdAt = (item as { created_at?: string }).created_at;
+          const time = createdAt ? new Date(createdAt).toLocaleString("id-ID", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }) : "Baru saja";
+
+          const statusLabel = ["success", "completed", "done", "sent"].includes(statusValue)
+            ? template.status
+            : statusValue === "received" || statusValue === "pending"
+              ? "Diproses"
+              : template.status;
+
+          return {
+            id: String((item as { id?: string }).id || `${index}`),
+            title: `${template.title} · ${nomorPa}`,
+            description,
+            time,
+            status: statusLabel,
+          };
+        });
+
+        if (!mounted) return;
+        setStats({ totalRecords, pendingTasks, completedToday });
+        setActivityItems(mappedActivities);
+      } catch {
+        if (!mounted) return;
+        setActivityItems([]);
+        setStats({ totalRecords: 0, pendingTasks: 0, completedToday: 0 });
+      } finally {
+        if (mounted) setStatsLoading(false);
       }
-    } catch {
-      // ignore parse errors and keep fallback
-    }
+    };
+    // Test hook: loadDashboardData()
+    // - Memuat ringkasan collections untuk ditampilkan di dashboard (stats + recent activity).
+
+    loadDashboardData();
 
     return () => {
       mounted = false;
@@ -185,6 +246,8 @@ export default function Dashboard() {
     setProfileStatus({ type: "success", message: "Profil berhasil disimpan." });
     setIsSavingProfile(false);
   };
+  // Test hook: saveProfile()
+  // - Menyimpan perubahan profil user via Supabase auth.updateUser.
 
   const username = meta.username || "Faisal";
   const avatar   = meta.avatar_url || "https://i.pravatar.cc/64?img=12";
@@ -347,17 +410,60 @@ export default function Dashboard() {
           )}
           {/* ... (seluruh isi dashboard Anda yang sebelumnya ada di dalam {!listening ? (...)}) ... */}
           <div className={s.topCards}>
-            <div className={s.statsCard}><div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></div><div className={s.cardContent}><h3>Total Sessions</h3><div className={s.cardValue}>24</div><div className={s.cardSubtext}>+3 this week</div></div></div>
-            <div className={s.statsCard}><div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg></div><div className={s.cardContent}><h3>Words Transcribed</h3><div className={s.cardValue}>12,847</div><div className={s.cardSubtext}>+1,234 today</div></div></div>
-            <div className={s.statsCard}><div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"></path></svg></div><div className={s.cardContent}><h3>Summaries Created</h3><div className={s.cardValue}>18</div><div className={s.cardSubtext}>+2 this week</div></div></div>
+            <div className={s.statsCard}>
+              <div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7h18"></path><path d="M5 7v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7"></path><path d="M8 11h8"></path><path d="M8 15h5"></path></svg></div>
+              <div className={s.cardContent}>
+                <h3>Total Records</h3>
+                <div className={s.cardValue}>{statsLoading ? "..." : stats.totalRecords}</div>
+                <div className={s.cardSubtext}>Data dari backend collections</div>
+              </div>
+            </div>
+            <div className={s.statsCard}>
+              <div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg></div>
+              <div className={s.cardContent}>
+                <h3>Pending Tasks</h3>
+                <div className={s.cardValue}>{statsLoading ? "..." : stats.pendingTasks}</div>
+                <div className={s.cardSubtext}>Masih menunggu proses</div>
+              </div>
+            </div>
+            <div className={s.statsCard}>
+              <div className={s.cardIcon}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+              <div className={s.cardContent}>
+                <h3>Completed Today</h3>
+                <div className={s.cardValue}>{statsLoading ? "..." : stats.completedToday}</div>
+                <div className={s.cardSubtext}>Selesai hari ini</div>
+              </div>
+            </div>
           </div>
           <div className={s.activitySection}>
-            <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '8px', display: 'inline-block', verticalAlign: 'middle'}}><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg> Summarize Activity</h2>
-            <div className={s.activityCard}><div className={s.activityHeader}><div className={s.activityTitle}>Recent Summarization</div><div className={s.activityStatus}>Active</div></div><div className={s.activityContent}><div className={s.activityItem}><div className={s.activityIcon}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><div className={s.activityInfo}><div className={s.activityName}>Meeting Notes Summary</div><div className={s.activityTime}>2 minutes ago</div></div><div className={s.activityResult}>Success</div></div><div className={s.activityItem}><div className={s.activityIcon}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"></path><path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"></path></svg></div><div className={s.activityInfo}><div className={s.activityName}>Voice Recording Processing</div><div className={s.activityTime}>5 minutes ago</div></div><div className={s.activityResult}>Processing</div></div><div className={s.activityItem}><div className={s.activityIcon}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div><div className={s.activityInfo}><div className={s.activityName}>Interview Transcription</div><div className={s.activityTime}>1 hour ago</div></div><div className={s.activityResult}>Success</div></div></div></div>
-          </div>
-          <div className={s.recentSection}>
-            <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '8px', display: 'inline-block', verticalAlign: 'middle'}}><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg> Recent Summaries</h2>
-            <div className={s.recentList}>{recentSummaries.map((item) => (<div key={item.id} className={s.recentItem}><div className={s.recentIcon}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg></div><div className={s.recentContent}><div className={s.recentTitle}>{item.title}</div><div className={s.recentDesc}>{item.description}</div><div className={s.recentTime}>{item.time}</div></div></div>))}</div>
+            <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '8px', display: 'inline-block', verticalAlign: 'middle'}}><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg> Recent Activity</h2>
+            <div className={s.activityCard}>
+              <div className={s.activityHeader}>
+                <div className={s.activityTitle}>Aktivitas terbaru</div>
+                <div className={s.activityStatus}>Live</div>
+              </div>
+              <div className={s.activityContent}>
+                {activityItems.length === 0 ? (
+                  <div className={s.activityItem}>
+                    <div className={s.activityInfo}>
+                      <div className={s.activityName}>Belum ada aktivitas</div>
+                      <div className={s.activityTime}>Data akan muncul setelah ada record baru</div>
+                    </div>
+                  </div>
+                ) : (
+                  activityItems.map((item, index) => (
+                    <div key={`${item.id}-${index}`} className={s.activityItem}>
+                      <div className={s.activityIcon}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+                      <div className={s.activityInfo}>
+                        <div className={s.activityName}>{item.title}</div>
+                        <div className={s.activityTime}>{item.description}</div>
+                      </div>
+                      <div className={s.activityResult}>{item.status}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

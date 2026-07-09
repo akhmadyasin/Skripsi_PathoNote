@@ -77,6 +77,9 @@ function isEditableField(key: string) {
   return !NON_EDITABLE_FIELDS.has(key.toLowerCase());
 }
 
+// Test hook: isEditableField(key)
+// - Menentukan apakah field boleh diedit (bypass RLS/readonly keys)
+
 function formatFieldName(key: string) {
   const normalized = key.toLowerCase();
   const friendly = FIELD_LABELS[normalized.toUpperCase() as keyof typeof FIELD_LABELS];
@@ -86,6 +89,9 @@ function formatFieldName(key: string) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Test hook: formatFieldName(key)
+// - Mengubah nama field teknis menjadi label yang ramah-tampilan.
+
 function renderFieldValue(value: any) {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -93,17 +99,26 @@ function renderFieldValue(value: any) {
   return String(value);
 }
 
+// Test hook: renderFieldValue(value)
+// - Normalisasi nilai field untuk ditampilkan (stringify, boolean, null handling).
+
 function getReportFieldKeys(item: PathologyRecord) {
   const ordered = REPORT_FIELD_ORDER.filter((key) => key in item);
   const otherKeys = Object.keys(item).filter((key) => !ordered.includes(key));
   return [...ordered, ...otherKeys];
 }
 
+// Test hook: getReportFieldKeys(item)
+// - Menghasilkan urutan kunci report yang akan dirender atau diedit.
+
 function getReportText(item: PathologyRecord) {
   return getReportFieldKeys(item)
     .map((fieldKey) => `${formatFieldName(fieldKey)}: ${renderFieldValue(item[fieldKey])}`)
     .join('\n');
 }
+
+// Test hook: getReportText(item)
+// - Mengembalikan teks lengkap report (plaintext) yang digunakan untuk share/email.
 
 const ADMINISTRATION_FIELDS: string[] = [
   'nomor_pa',
@@ -150,6 +165,9 @@ function buildSectionKeys(item: PathologyRecord, keys: string[]) {
   return keys.filter((key) => key in item && item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '');
 }
 
+// Test hook: buildSectionKeys(item, keys)
+// - Filter keys untuk section PDF/print yang memiliki nilai.
+
 function drawPdfSection(
   doc: any,
   title: string,
@@ -179,25 +197,37 @@ function drawPdfSection(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
 
+  const labelColumnWidth = Math.max(
+    0,
+    ...keys.map((key) => doc.getTextWidth(`${formatFieldName(key)}`)),
+  ) + 4;
+  const colonX = x + labelColumnWidth;
+  const valueStartX = colonX + 1.5;
+  const valueWidth = Math.max(10, width - (valueStartX - x));
+
   keys.forEach((key) => {
     const label = formatFieldName(key);
     const value = renderFieldValue(item[key]);
-    const wrapped = doc.splitTextToSize(`${label}: ${value}`, width);
+    const wrappedValue = doc.splitTextToSize(value, valueWidth);
 
-    wrapped.forEach((line: string) => {
-      if (y + lineHeight > pageHeight - margin - 40) {
-        doc.addPage();
-        y = margin;
-      }
-      doc.text(line, x, y);
-      y += lineHeight;
-    });
+    const lineCount = Math.max(1, wrappedValue.length);
+    if (y + lineHeight * lineCount > pageHeight - margin - 40) {
+      doc.addPage();
+      y = margin;
+    }
 
-    y += 2;
+    doc.text(label, x, y);
+    doc.text(':', colonX, y);
+    doc.text(wrappedValue, valueStartX, y);
+    y += lineHeight * lineCount;
+    y += 1;
   });
 
   return y;
 }
+
+// Test hook: drawPdfSection(doc, title, item, fieldKeys, ...)
+// - Menambahkan section ke dokumen jsPDF; gunakan untuk verifikasi layout/isi PDF.
 
 function formatItemDate(item: PathologyRecord) {
   if (item.tanggal) {
@@ -212,6 +242,9 @@ function formatItemDate(item: PathologyRecord) {
   }
   return item.id || '';
 }
+
+// Test hook: formatItemDate(item)
+// - Format tanggal/waktu dari item untuk tampilan ringkas.
 // Supports **bold** markers, list items starting with '- ', and preserves line breaks.
 function renderSummaryHtml(src: string | undefined | null) {
   if (!src) return "";
@@ -278,6 +311,9 @@ function renderSummaryHtml(src: string | undefined | null) {
   closeListIfOpen();
   return out.join('\n');
 }
+
+// Test hook: renderSummaryHtml(src)
+// - Konversi markdown-lite ke HTML (bold, lists) untuk preview.
 
 export default function DetailPage() {
   const router = useRouter();
@@ -750,7 +786,7 @@ export default function DetailPage() {
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     const margin = 10;
-    const lineHeight = 7;
+    const lineHeight = 6.2;
 
     // Header
     doc.setFontSize(16);
@@ -761,9 +797,9 @@ export default function DetailPage() {
     // Content
     doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
-    let cursorY = margin + 30;
+    let cursorY = margin + 24;
     const contentWidth = pageWidth - margin * 2;
-    const sectionGap = 8;
+    const sectionGap = 6;
     const columnWidth = (contentWidth - sectionGap) / 2;
 
     const leftEndY = drawPdfSection(
@@ -793,7 +829,7 @@ export default function DetailPage() {
       lineHeight,
     );
 
-    cursorY = Math.max(leftEndY, rightEndY) + 10;
+    cursorY = Math.max(leftEndY, rightEndY) + 7;
     if (cursorY > pageHeight - margin - 70) {
       doc.addPage();
       cursorY = margin;
@@ -816,10 +852,10 @@ export default function DetailPage() {
     // Signature section
     const leftX = margin + 50;
     const rightX = pageWidth - margin - 50;
-    const signatureLabelY = pageHeight - 74;
-    const signatureImageY = pageHeight - 70;
-    const signatureLineY = pageHeight - 26;
-    const signatureNameY = pageHeight - 14;
+    const signatureLabelY = pageHeight - 84;
+    const signatureImageY = pageHeight - 80;
+    const signatureLineY = pageHeight - 46;
+    const signatureNameY = pageHeight - 24;
     const maxSignatureWidth = 80;
     const maxSignatureHeight = 45;
     const defaultSignatureAspectRatio = 3.5; // typical signature is wider than tall
@@ -903,7 +939,7 @@ export default function DetailPage() {
         signatureLineY,
       );
       doc.setFontSize(11);
-      doc.setFont('helvetica', 'italic');
+      doc.setFont('helvetica', 'normal');
       doc.text(petugasName, leftX, signatureNameY, { align: 'center' });
 
       await addSignatureImageToPdf(
@@ -926,7 +962,7 @@ export default function DetailPage() {
         signatureLineY,
       );
       doc.setFontSize(11);
-      doc.setFont('helvetica', 'italic');
+      doc.setFont('helvetica', 'normal');
       doc.text(doctorName, rightX, signatureNameY, { align: 'center' });
     }
 

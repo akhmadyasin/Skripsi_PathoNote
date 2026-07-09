@@ -11,7 +11,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [resetSent, setResetSent] = useState(false);
 
 
 
@@ -40,47 +39,25 @@ export default function LoginPage() {
     router.push("/dashboard");
   };
 
-  const onGoogle = async () => {
-    setErr(null);
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${location.origin}/auth/callback` },
-    });
-    setLoading(false);
-    if (error) setErr(error.message);
-  };
-
-  const onForgot = async () => {
-    if (!email) {
+  const onForgot = () => {
+    if (!email.trim()) {
       setErr("Please enter your email address first to reset password.");
       return;
     }
-    setErr(null);
-    setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/auth/update-password`,
-    });
-    setLoading(false);
-    if (error) setErr(error.message);
-    else setResetSent(true);
+
+    router.push(`/auth/reset-password?email=${encodeURIComponent(email.trim())}`);
   };
 
   return (
     <div className="auth-container">
       <div className="form-side">
         <div className="form-box">
-          <h1>Welcome</h1>
+          <h1>Welcome Back</h1>
           <p style={{ textAlign:'center', color:'#6b7280', marginBottom:24, fontSize:14 }}>
             Sign in to your account to continue
           </p>
 
           {err && <div className="alert">{err}</div>}
-          {resetSent && (
-            <div className="alert success">
-              Password reset link has been sent to your email.
-            </div>
-          )}
 
           <form onSubmit={onSubmit}>
             <label>Email</label>
@@ -120,21 +97,6 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Log In"}
             </button>
           </form>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            margin: '24px 0',
-            color: '#9ca3af'
-          }}>
-            <div style={{ flex: 1, height: '1px', background: '#e5e7eb' }} />
-            <span style={{ padding: '0 16px', fontSize: 14 }}>or continue with</span>
-            <div style={{ flex: 1, height: '1px', background: '#e5e7eb' }} />
-          </div>
-
-          <button className="btn google" type="button" onClick={onGoogle} disabled={loading}>
-            <span className="g">G</span> Log in with Google
-          </button>
 
           <p className="muted center">
             Account creation is restricted. Please ask your Superadmin to create a user for you.
