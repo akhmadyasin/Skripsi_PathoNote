@@ -293,7 +293,8 @@ export default function HistoryPage() {
               <a className={`${s.navItem} ${s.active}`} href="/history">History</a>
               <a className={s.navItem} href="/settings">Settings</a>
             </nav>
-            <div className={s.sbFooter}>© 2025 Neurabot</div>
+            <div className={s.sbFooter}>© Universitas Harkat Negeri | Developed by Akhmad Yasin</div>
+            <div className={s.sbFooter}>© 2025 Neurabot | Base on initial development</div>
           </div>
         </aside>
         <main className={s.content}>

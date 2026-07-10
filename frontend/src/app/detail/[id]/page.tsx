@@ -1141,6 +1141,7 @@ export default function DetailPage() {
           </nav>
 
           <div className={s.sbFooter}>
+            <div style={{ opacity: 0.6 }}>© Harkat Negeri developed by Akhmad Yasin</div>
             <div style={{ opacity: 0.6 }}>© 2025 Neurabot</div>
           </div>
         </div>

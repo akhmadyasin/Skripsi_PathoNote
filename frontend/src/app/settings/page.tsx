@@ -428,7 +428,8 @@ export default function SettingsPage() {
           </nav>
 
           <div className={s.sbFooter}>
-            <div style={{ opacity: 0.6 }}>© 2025 Neurabot</div>
+            <div style={{ opacity: 0.6 }}>© Universitas Harkat Negeri | Developed by Akhmad Yasin</div>
+            <div style={{ opacity: 0.6 }}>© 2025 Neurabot | Base on initial development</div>
           </div>
         </div>
       </aside>
