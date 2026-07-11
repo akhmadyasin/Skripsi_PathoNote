@@ -29,7 +29,7 @@ type UserMeta = {
 
 export default function HistoryPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");

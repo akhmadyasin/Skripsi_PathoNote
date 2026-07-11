@@ -5,7 +5,7 @@ import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

@@ -12,7 +12,7 @@ type UserMeta = {
 
 export default function RegisterPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   const [username, setUsername] = useState("");
   const [email, setEmail]       = useState("");

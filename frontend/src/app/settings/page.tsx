@@ -58,7 +58,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   // auth/session
   const [loading, setLoading] = useState(true);

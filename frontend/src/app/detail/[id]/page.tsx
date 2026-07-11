@@ -318,7 +318,7 @@ function renderSummaryHtml(src: string | undefined | null) {
 export default function DetailPage() {
   const router = useRouter();
   const params = useParams();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
   const id = params.id as string;
 
   // auth/session

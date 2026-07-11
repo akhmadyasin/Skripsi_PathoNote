@@ -6,7 +6,7 @@ import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
 export default function UpdatePasswordPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");

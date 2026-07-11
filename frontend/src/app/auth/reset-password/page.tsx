@@ -1,12 +1,13 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const searchParams = useSearchParams();
-  const supabase = supabaseBrowser();
+  const supabase = supabaseBrowser;
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -86,5 +87,13 @@ export default function ResetPasswordPage() {
         <img src="/login.jpg" alt="Reset Password" />
       </div>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="auth-container" style={{ justifyContent: "center", alignItems: "center" }}>Loading...</div>}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }
