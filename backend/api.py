@@ -1,4 +1,8 @@
 # backend/api.py
+import eventlet
+# Wajib dipanggil pertama kali sebelum import library apapun!
+eventlet.monkey_patch(thread=True, time=True)
+
 import os
 import time
 import re
