@@ -1,7 +1,7 @@
 # backend/api.py
 import eventlet
-# Wajib dipanggil pertama kali sebelum import library apapun!
-eventlet.monkey_patch(thread=True, time=True)
+# Batasi patching agar modul SSL/HTTPS ke luar (Groq) tidak rusak
+eventlet.monkey_patch(thread=True, time=True, os=True, select=True, socket=True)
 
 import os
 import time
@@ -63,7 +63,10 @@ def _save_collections_store(records: list) -> None:
 # =========================
 # Config & Init
 # =========================
-load_dotenv()
+base_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(base_dir, ".env")
+load_dotenv(dotenv_path=env_path)
+
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.6-27b")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
