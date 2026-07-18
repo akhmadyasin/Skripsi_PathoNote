@@ -175,8 +175,8 @@
   align-items: center;
   justify-content: center;
   padding: 6px 14px;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: rgba(56, 182, 255, 0.12);
+  color: #38b6ff;
   border-radius: 9999px;
   font-size: 12px;
   font-weight: 600;
@@ -241,21 +241,21 @@
 
 .previewButton {
   margin-right: 8px;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: rgba(56, 182, 255, 0.12);
+  color: #38b6ff;
 }
 
 .previewButton:hover {
-  background: #bae6fd;
+  background: rgba(56, 182, 255, 0.18);
 }
 
 .primaryButton {
-  background: #2563eb;
+  background: #38b6ff;
   color: #ffffff;
 }
 
 .primaryButton:hover {
-  background: #1d4ed8;
+  background: #1fa4f5;
 }
 
 .secondaryButton {
@@ -401,32 +401,24 @@
 }
 
 @media (max-width: 768px) {
-  .previewBody {
-    padding: 18px 20px;
-  }
-
-  .previewHeader,
-  .previewActions {
-    padding-left: 18px;
-    padding-right: 18px;
-  }
-}
-
-@media (max-width: 1024px) {
-  .header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
-@media (max-width: 768px) {
   .container {
-    padding: 18px 16px;
+    padding: 18px 10px;
+  }
+
+  .tableContainer {
+    overflow-x: auto;
+    border-radius: 14px;
+  }
+
+  .table {
+    min-width: 620px;
+    font-size: 13px;
   }
 
   .table th,
   .table td {
     padding: 12px 10px;
+    white-space: nowrap;
   }
 
   .truncate {
@@ -435,5 +427,25 @@
 
   .title {
     font-size: 24px;
+  }
+
+  .previewBody {
+    padding: 18px 16px;
+  }
+
+  .previewHeader,
+  .previewActions {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .previewMeta {
+    grid-template-columns: 1fr;
+  }
+
+  .previewModal {
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 18px;
   }
 }

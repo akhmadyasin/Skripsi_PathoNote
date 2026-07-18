@@ -134,7 +134,7 @@ export default function RegisterPage() {
           </div>
         </div>
         <div className="image-side">
-          <img src="/login.jpg" alt="Admin Area" />
+          <img src="/login.png" alt="Admin Area" />
         </div>
       </div>
     );
@@ -234,7 +234,7 @@ export default function RegisterPage() {
       </div>
 
       <div className="image-side">
-        <img src="/login.jpg" alt="Create User" />
+        <img src="/login.png" alt="Create User" />
       </div>
     </div>
   );

@@ -3,6 +3,10 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --primary: #38b6ff;
+  --primary-hover: #1fa4f5;
+  --primary-soft: rgba(56, 182, 255, 0.12);
+  --primary-border: rgba(56, 182, 255, 0.25);
 }
 
 @theme inline {

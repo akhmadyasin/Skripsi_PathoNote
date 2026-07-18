@@ -10,9 +10,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .headerActions {
@@ -223,13 +223,13 @@
 }
 
 .shareBtn {
-  background: #f0f9ff;
-  color: #0ea5e9;
+  background: rgba(56, 182, 255, 0.12);
+  color: #38b6ff;
 }
 
 .shareBtn:hover {
-  background: #e0f2fe;
-  color: #0284c7;
+  background: rgba(56, 182, 255, 0.18);
+  color: #1fa4f5;
 }
 
 .cardDate,
@@ -365,14 +365,14 @@
 }
 
 .primaryBtn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #38b6ff 0%, #38b6ff 100%);
   color: white;
   border-color: transparent;
 }
 
 .primaryBtn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px rgba(56, 182, 255, 0.35);
 }
 
 .secondaryBtn {
@@ -408,7 +408,7 @@
   width: 80px;
   height: 80px;
   margin: 0 auto 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #38b6ff 0%, #38b6ff 100%);
   border-radius: 20px;
   display: flex;
   align-items: center;
@@ -438,6 +438,10 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .historyContainer {
+    padding: 0 0 24px;
+  }
+
   .historyHeader {
     flex-direction: column;
     align-items: flex-start;

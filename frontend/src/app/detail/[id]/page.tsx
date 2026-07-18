@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { format } from 'date-fns';
-import Image from "next/image";
 import { useRouter, useParams } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
@@ -325,6 +324,7 @@ export default function DetailPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
+  const [userRole, setUserRole] = useState<string>('');
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -342,12 +342,12 @@ export default function DetailPage() {
   const [editValues, setEditValues] = useState<Partial<PathologyRecord>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  const [isSendingToApi, setIsSendingToApi] = useState(false);
-  const [sendApiStatus, setSendApiStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
 
   // share email modal
   const [showShareEmailModal, setShowShareEmailModal] = useState(false);
   const [shareEmailTo, setShareEmailTo] = useState("");
+  const [pdfFileName, setPdfFileName] = useState("");
   const [shareEmailStatus, setShareEmailStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [userId, setUserId] = useState<string>("");
@@ -366,6 +366,8 @@ export default function DetailPage() {
       }
       setEmail(session.user.email || "");
       setMeta((session.user.user_metadata as UserMeta) || {});
+      const role = ((session.user.user_metadata as any)?.role || '').toString().toLowerCase();
+      setUserRole(role);
       setUserId(session.user.id);
       setUserName(
         (session.user.user_metadata as UserMeta)?.display_name ||
@@ -570,48 +572,7 @@ export default function DetailPage() {
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  const handleSendToApi = async () => {
-    if (!detailData) return;
-
-    setIsSendingToApi(true);
-    setSendApiStatus(null);
-
-    try {
-      const backendUrl = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
-      const response = await fetch(`${backendUrl}/api/collections`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          collection_id: detailData.id,
-          source: 'detail_page',
-          report_id: detailData.id,
-          hasil_patologi_id: detailData.id,
-          petugas_id: userId || detailData.user_id,
-          nama_petugas: userName || 'System',
-          record: detailData,
-        }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data?.error || data?.message || 'Gagal mengirim data ke API');
-      }
-
-      setSendApiStatus({
-        type: 'success',
-        message: data?.message || 'Data berhasil dikirim ke API Anda.',
-      });
-    } catch (error: any) {
-      console.error('Error sending collection to API:', error);
-      setSendApiStatus({
-        type: 'error',
-        message: error?.message || 'Terjadi kesalahan saat mengirim ke API.',
-      });
-    } finally {
-      setIsSendingToApi(false);
-    }
-  };
+  // NOTE: "Kirim ke API" flow removed — use centralized upload workflow instead.
 
   const handleShareEmail = () => {
     if (!detailData) return;
@@ -966,7 +927,24 @@ export default function DetailPage() {
       doc.text(doctorName, rightX, signatureNameY, { align: 'center' });
     }
 
-    doc.save(`transcription-${detailData.id}.pdf`);
+    const finalPdfName = (pdfFileName && pdfFileName.trim()) ? pdfFileName.trim() : `transcription-${detailData.id}.pdf`;
+    doc.save(finalPdfName);
+
+    // Log history_pengiriman entry for petugas role when exporting PDF
+    try {
+      if ((userRole || '').toString().toLowerCase() === 'petugas') {
+        await supabase.from('history_pengiriman').insert({
+          hasil_patologi_id: detailData.id,
+          petugas_id: userId || null,
+          nama_petugas: userName || null,
+          metode_pengiriman: 'export_pdf',
+          tujuan_pengiriman: finalPdfName,
+          status: 'success',
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to log history_pengiriman for export_pdf:', err);
+    }
   };
 
   const handleExport = () => {
@@ -1050,18 +1028,18 @@ export default function DetailPage() {
 
   if (loading) {
     return (
-      <div className={s.app}>
+      <>
         <main className={s.content}>
           <div className={s.card}>Loading...</div>
         </main>
-      </div>
+      </>
     );
   }
 
   if (!detailData) {
     if (notFound) {
       return (
-        <div className={s.app}>
+        <>
           <main className={s.content}>
             <div className={s.card}>
               <h3>Data tidak ditemukan</h3>
@@ -1080,109 +1058,26 @@ export default function DetailPage() {
               </div>
             </div>
           </main>
-        </div>
+        </>
       );
     }
 
     return (
-      <div className={s.app}>
+      <>
         <main className={s.content}>
           <div className={s.card}>Loading transcription...</div>
         </main>
-      </div>
+      </>
     );
   }
 
   return (
-    <div className={s.app}>
-      {/* SIDEBAR */}
-      <aside className={s.sidebar}>
-        <div className={s.sbInner}>
-          <div className={s.brand}>
-            <Image
-              src="/logo_neurabot.jpg"
-              alt="Logo Neurabot"
-              width={36}
-              height={36}
-              className={s.brandImg}
-            />
-            <div className={s.brandName}>PathoNote</div>
-          </div>
+    <>
+      {/* SIDEBAR REMOVED - Now in LayoutClient */}
+      <aside style={{ display: 'none' }}></aside>
 
-          <nav className={s.nav} aria-label="Sidebar">
-            <a href="/dashboard" className={s.navItem}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                <polyline points="9,22 9,12 15,12 15,22"></polyline>
-              </svg>
-              <span>Dashboard</span>
-            </a>
-            <a href="/collections" className={s.navItem}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,6 12,12 16,14"></polyline>
-              </svg>
-              <span>Collections</span>
-            </a>
-            <a href="/history" className={s.navItem}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,8 12,12 15,15"></polyline>
-              </svg>
-              <span>History</span>
-            </a>
-            <a href="/settings" className={s.navItem}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg>
-              <span>Settings</span>
-            </a>
-          </nav>
-
-          <div className={s.sbFooter}>
-            <div style={{ opacity: 0.6 }}>© Harkat Negeri developed by Akhmad Yasin</div>
-            <div style={{ opacity: 0.6 }}>© 2025 Neurabot</div>
-          </div>
-        </div>
-      </aside>
-
-      {/* TOPBAR */}
-      <header className={s.topbar}>
-        <div className={s.tbWrap}>
-          <div className={s.leftGroup}>
-          </div>
-
-          <div className={s.rightGroup}>
-            <div className={s.avatar} onClick={toggleProfileDropdown}>
-              <Image src={avatar} alt="Foto profil" width={36} height={36} unoptimized />
-              <div className={s.meta}>
-                <div className={s.name}>{username}</div>
-              </div>
-              
-              {showProfileDropdown && (
-                <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={openProfileModal}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                    Profile
-                  </button>
-                  <button className={s.dropdownItem} onClick={onLogout}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                      <polyline points="16,17 21,12 16,7"></polyline>
-                      <line x1="21" y1="12" x2="9" y2="12"></line>
-                    </svg>
-                    Logout
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
+      {/* TOPBAR REMOVED - Now in LayoutClient */}
+      <header style={{ display: 'none' }}></header>
 
       {/* CONTENT */}
       <main className={s.content}>
@@ -1219,55 +1114,49 @@ export default function DetailPage() {
                   <path d="M15 18l-6-6 6-6"></path>
                 </svg>
               </button>
-              {!isEditing ? (
-                <button className={d.actionButton} onClick={startEditing} title="Edit" aria-label="Edit" type="button">
-                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 20h16"></path>
-                    <path d="M18.5 5.5a2.121 2.121 0 0 1 3 3L9 21l-4 1 1-4L18.5 5.5Z"></path>
-                  </svg>
-                </button>
-              ) : (
-                <>
-                  <button className={d.actionButton} onClick={saveEdit} disabled={isSaving}>
-                    {isSaving ? 'Menyimpan...' : 'Simpan'}
+              {userRole !== 'superadmin' && (
+                !isEditing ? (
+                  <button className={d.actionButton} onClick={startEditing} title="Edit" aria-label="Edit" type="button">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 20h16"></path>
+                      <path d="M18.5 5.5a2.121 2.121 0 0 1 3 3L9 21l-4 1 1-4L18.5 5.5Z"></path>
+                    </svg>
                   </button>
-                  <button className={d.secondaryButton} onClick={cancelEditing} disabled={isSaving}>
-                    Batal
-                  </button>
-                </>
+                ) : (
+                  <>
+                    <button className={d.actionButton} onClick={saveEdit} disabled={isSaving}>
+                      {isSaving ? 'Menyimpan...' : 'Simpan'}
+                    </button>
+                    <button className={d.secondaryButton} onClick={cancelEditing} disabled={isSaving}>
+                      Batal
+                    </button>
+                  </>
+                )
               )}
-              <button className={d.actionButton} onClick={handleShareEmail} title="Share Email" aria-label="Share Email" type="button">
+              {userRole === 'petugas' && (
+                <button className={d.actionButton} onClick={handleShareEmail} title="Share Email" aria-label="Share Email" type="button">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 7h16v10H4z"></path>
                   <path d="M4 7l8 6 8-6"></path>
                 </svg>
-              </button>
-              <button
-                className={d.actionButton}
-                onClick={async () => await handleExportPdf()}
-                type="button"
-                title="Export PDF"
-                aria-label="Export PDF"
-              >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3v12"></path>
-                  <path d="M8 13l4 4 4-4"></path>
-                  <path d="M6 21h12"></path>
-                </svg>
-              </button>
-              <button
-                className={d.actionButton}
-                onClick={handleSendToApi}
-                disabled={isSendingToApi}
-                type="button"
-                title="Kirim ke API"
-                aria-label="Kirim ke API"
-              >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M7 17L17 7"></path>
-                  <path d="M7 7h10v10"></path>
-                </svg>
-              </button>
+                </button>
+              )}
+              {userRole === 'petugas' && (
+                <button
+                  className={d.actionButton}
+                  onClick={async () => await handleExportPdf()}
+                  type="button"
+                  title="Export PDF"
+                  aria-label="Export PDF"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3v12"></path>
+                    <path d="M8 13l4 4 4-4"></path>
+                    <path d="M6 21h12"></path>
+                  </svg>
+                </button>
+              )}
+              {/* "Kirim ke API" removed */}
             </div>
           </div>
 
@@ -1277,11 +1166,7 @@ export default function DetailPage() {
             </div>
           )}
 
-          {sendApiStatus && (
-            <div className={sendApiStatus.type === 'success' ? d.saveSuccess : d.saveError} style={{ marginBottom: 16 }}>
-              {sendApiStatus.message}
-            </div>
-          )}
+          
 
           <div className={h.cardContent}>
             <div className={h.reportFields}>
@@ -1313,18 +1198,20 @@ export default function DetailPage() {
           </div>
 
           <div className={d.footerActions}>
-            <button className={d.dangerButton} onClick={handleDelete}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3,6 5,6 21,6"></polyline>
-                <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                <line x1="10" y1="11" x2="10" y2="17"></line>
-                <line x1="14" y1="11" x2="14" y2="17"></line>
-              </svg>
-              Delete
-            </button>
+            {userRole !== 'superadmin' && (
+              <button className={d.dangerButton} onClick={handleDelete}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3,6 5,6 21,6"></polyline>
+                  <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+                Delete
+              </button>
+            )}
           </div>
         </div>
-      </main>
+      
 
       {/* Profile Modal */}
       {showProfileModal && (
@@ -1502,6 +1389,7 @@ export default function DetailPage() {
           </div>
         </div>
       )}
-    </div>
+      </main>
+    </>
   );
 }

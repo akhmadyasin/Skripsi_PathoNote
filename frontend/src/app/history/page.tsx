@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css";
@@ -34,6 +33,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
   const [meta, setMeta] = useState<UserMeta>({});
+  const [userRole, setUserRole] = useState<string>('');
   const [histories, setHistories] = useState<HistoryRecord[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +41,7 @@ export default function HistoryPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewRecord, setPreviewRecord] = useState<PathologyRecord | null>(null);
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [previewCreatorMeta, setPreviewCreatorMeta] = useState<UserMeta | null>(null);
 
   // Fetch session dan data history
   useEffect(() => {
@@ -59,18 +59,25 @@ export default function HistoryPage() {
         const userMeta = (session.user.user_metadata as UserMeta) || {};
         setEmail(session.user.email || "");
         setMeta(userMeta);
+        const role = ((session.user.user_metadata as any)?.role || '').toString().toLowerCase();
+        setUserRole(role);
 
-        // Fetch history_pengiriman data
+        // Fetch history_pengiriman data (only share-via-email events across all users)
         const { data, error: fetchError } = await supabase
           .from("history_pengiriman")
           .select("*")
+          // Fetch records where metode_pengiriman or tujuan_pengiriman mention "email"
+          // using case-insensitive LIKE to cover variations (e.g. "Email", "share via email")
+          .or("metode_pengiriman.ilike.%email%,tujuan_pengiriman.ilike.%email%")
           .order("created_at", { ascending: false });
 
         if (fetchError) {
           setError(`Gagal memuat history: ${fetchError.message}`);
           console.error("Fetch error:", fetchError);
         } else {
-          setHistories(data || []);
+          // Filter out user-management events (created/deleted user) from the histories view
+          const filtered = (data || []).filter((rec: HistoryRecord) => !isUserManagementEvent(rec));
+          setHistories(filtered as HistoryRecord[]);
         }
       } catch (err) {
         console.error("Error:", err);
@@ -92,8 +99,18 @@ export default function HistoryPage() {
 
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
 
-  const username = meta.username || email.split("@")[0] || "User";
-  const avatar = meta.avatar_url || "https://i.pravatar.cc/64?img=12";
+  async function fetchUserMetaById(userId?: string | null) {
+    if (!userId) return null;
+    try {
+      const res = await fetch(`${API_BASE}/api/user-meta/${encodeURIComponent(userId)}`);
+      if (!res.ok) return null;
+      const data = await res.json().catch(() => ({}));
+      const meta = data?.user_metadata || data?.raw_user_meta_data || data?.user_metadata || {};
+      return meta as UserMeta;
+    } catch (e) {
+      return null;
+    }
+  }
 
   const getStatusColor = (status: unknown) => {
     // Test hook: getStatusColor(status)
@@ -131,6 +148,31 @@ export default function HistoryPage() {
       default:
         return status === null || status === undefined ? "-" : String(status);
     }
+  };
+
+  const isUserManagementEvent = (record: HistoryRecord) => {
+    const check = (v: unknown) => (v || '').toString().toLowerCase();
+    const metode = check(record.metode_pengiriman);
+    const tujuan = check(record.tujuan_pengiriman);
+    const petugas = check(record.nama_petugas);
+
+    // common keywords indicating user creation/deletion / admin user events
+    const userKeywords = ['user', 'pengguna', 'akun'];
+    const createKeywords = ['create', 'created', 'created user', 'create_user', 'tambah', 'register', 'registrasi'];
+    const deleteKeywords = ['delete', 'deleted', 'hapus', 'remove'];
+
+    const containsAny = (text: string, arr: string[]) => arr.some((k) => text.includes(k));
+
+    // If metode or tujuan or petugas mention both user and create/delete keywords, classify as user-management
+    if (containsAny(metode, userKeywords) && (containsAny(metode, createKeywords) || containsAny(metode, deleteKeywords))) return true;
+    if (containsAny(tujuan, userKeywords) && (containsAny(tujuan, createKeywords) || containsAny(tujuan, deleteKeywords))) return true;
+    if (containsAny(petugas, userKeywords) && (containsAny(petugas, createKeywords) || containsAny(petugas, deleteKeywords))) return true;
+
+    // fallback: method explicitly equals common labels
+    const explicit = ['created user', 'delete user', 'user created', 'user deleted', 'create user', 'hapus pengguna'];
+    if (explicit.includes(metode)) return true;
+
+    return false;
   };
 
   const formatDate = (dateString?: string) => {
@@ -214,6 +256,9 @@ export default function HistoryPage() {
       }
 
       setPreviewRecord(data as PathologyRecord);
+      // fetch creator metadata (if available)
+      const creatorMeta = await fetchUserMetaById((data as any)?.user_id || null);
+      setPreviewCreatorMeta(creatorMeta);
     } catch (err: any) {
       console.error("Preview error:", err);
       setPreviewError(err?.message || "Gagal memuat preview.");
@@ -228,6 +273,7 @@ export default function HistoryPage() {
     setShowPreviewModal(false);
     setPreviewRecord(null);
     setPreviewError(null);
+    setPreviewCreatorMeta(null);
   };
 
   const filteredHistories = useMemo(() => {
@@ -270,109 +316,28 @@ export default function HistoryPage() {
         return;
       }
 
-      setHistories(histories.filter((h) => h.id !== id));
+      setHistories((prev) => prev.filter((h) => h.id !== id));
       alert("Record berhasil dihapus");
     } catch (err) {
-      console.error("Delete error:", err);
-      alert("Gagal menghapus record");
+      console.error("Delete network error:", err);
+      alert("Terjadi kesalahan saat menghapus record");
     }
   };
 
   if (loading) {
     return (
-      <div className={s.app}>
-        <aside className={s.sidebar}>
-          <div className={s.sbInner}>
-            <div className={s.brand}>
-              <Image src="/logo_neurabot.jpg" alt="Logo PathoNote" width={36} height={36} className={s.brandImg} />
-              <div className={s.brandName}>PathoNote</div>
-            </div>
-            <nav className={s.nav} aria-label="Sidebar">
-              <a className={s.navItem} href="/dashboard">Dashboard</a>
-              <a className={`${s.navItem}`} href="/collections">Collections</a>
-              <a className={`${s.navItem} ${s.active}`} href="/history">History</a>
-              <a className={s.navItem} href="/settings">Settings</a>
-            </nav>
-            <div className={s.sbFooter}>© Universitas Harkat Negeri | Developed by Akhmad Yasin</div>
-            <div className={s.sbFooter}>© 2025 Neurabot | Base on initial development</div>
-          </div>
-        </aside>
+      <>
         <main className={s.content}>
-          <div className={s.card} style={{ textAlign: "center" }}>Memuat data...</div>
+          <div className={h.historyContainer}>
+            <div className={h.card} style={{ textAlign: "center" }}>Memuat data...</div>
+          </div>
         </main>
-      </div>
+      </>
     );
   }
 
   return (
-    <div className={s.app}>
-      <aside className={s.sidebar}>
-        <div className={s.sbInner}>
-          <div className={s.brand}>
-            <Image src="/logo_neurabot.jpg" alt="Logo PathoNote" width={36} height={36} className={s.brandImg} />
-            <div className={s.brandName}>PathoNote</div>
-          </div>
-
-          <nav className={s.nav} aria-label="Sidebar">
-            <a className={s.navItem} href="/dashboard">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9,22 9,12 15,12 15,22"></polyline></svg>
-              <span>Dashboard</span>
-            </a>
-            <a className={s.navItem} href="/collections">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,6 12,12 16,14"></polyline></svg>
-              <span>Collections</span>
-            </a>
-            <a className={`${s.navItem} ${s.active}`} href="/history">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12,8 12,12 15,15"></polyline></svg>
-              <span>History</span>
-            </a>
-            <a className={s.navItem} href="/settings">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-              <span>Settings</span>
-            </a>
-          </nav>
-
-          <div className={s.sbFooter}>© 2025 Neurabot</div>
-        </div>
-      </aside>
-
-      <header className={s.topbar}>
-        <div className={s.tbWrap}>
-          <div className={s.leftGroup}>
-            <div className={s.search} role="search">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-              </svg>
-              <input
-                type="search"
-                placeholder="Search history..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search history"
-              />
-            </div>
-          </div>
-          <div className={s.rightGroup}>
-            <div className={s.avatar} onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
-              <Image src={avatar} alt="Foto profil" width={40} height={40} unoptimized />
-              <div className={s.meta}>
-                <div className={s.name}>{username}</div>
-              </div>
-            </div>
-            {showProfileDropdown && (
-              <div className={s.profileDropdown}>
-                <button className={s.dropdownItem} onClick={() => router.push("/settings")}>⚙️ Pengaturan</button>
-                <button className={s.dropdownItem} onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.replace("/login");
-                }}>🚪 Keluar</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
+    <>
       <main className={s.content}>
         <div className={h.historyContainer}>
           {error && (
@@ -428,14 +393,16 @@ export default function HistoryPage() {
                         >
                           👁️
                         </button>
-                        <button
-                          className={h.deleteButton}
-                          onClick={() => handleDelete(record.id)}
-                          title="Hapus"
-                          type="button"
-                        >
-                          🗑️
-                        </button>
+                        {userRole !== 'dokter' && userRole !== 'superadmin' && (
+                          <button
+                            className={h.deleteButton}
+                            onClick={() => handleDelete(record.id)}
+                            title="Hapus"
+                            type="button"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -467,21 +434,23 @@ export default function HistoryPage() {
               ) : previewRecord ? (
                 <>
                   <div className={h.previewMeta}>
+                    {previewCreatorMeta && (
+                      <div>
+                        <strong>Dibuat Oleh</strong>
+                        <p>{previewCreatorMeta.display_name || previewCreatorMeta.username || previewCreatorMeta?.email || '-'}</p>
+                      </div>
+                    )}
                     <div>
-                      <strong>Petugas</strong>
-                      <p>{previewRecord.nama_petugas || "-"}</p>
+                      <strong>Tanggal</strong>
+                      <p>{previewRecord.tanggal || formatDate(previewRecord.created_at)}</p>
                     </div>
                     <div>
-                      <strong>Metode</strong>
-                      <p>{previewRecord.metode_pengiriman || "-"}</p>
+                      <strong>Jaringan</strong>
+                      <p>{previewRecord.jaringan || '-'}</p>
                     </div>
                     <div>
-                      <strong>Tujuan</strong>
-                      <p>{normalizeDestinationLabel(previewRecord.tujuan_pengiriman)}</p>
-                    </div>
-                    <div>
-                      <strong>Status</strong>
-                      <p>{getStatusLabel(previewRecord.status)}</p>
+                      <strong>Lokasi</strong>
+                      <p>{previewRecord.lokasi || '-'}</p>
                     </div>
                   </div>
                   <div className={h.previewContent}>
@@ -500,7 +469,7 @@ export default function HistoryPage() {
               <button className={h.secondaryButton} onClick={closePreviewModal} type="button">
                 Tutup
               </button>
-              {previewRecord && (
+              {previewRecord && userRole !== 'dokter' && (
                 <button className={h.primaryButton} onClick={() => {
                   closePreviewModal();
                   router.push(`/detail/${previewRecord.id}`);
@@ -512,6 +481,6 @@ export default function HistoryPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

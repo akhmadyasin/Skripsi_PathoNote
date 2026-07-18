@@ -31,33 +31,38 @@ from email.mime.multipart import MIMEMultipart
 # simple in-memory history store (newest first)
 history_store = []
 
-COLLECTIONS_STORE_PATH = os.path.join(os.path.dirname(__file__), "collections_store.json")
-
 
 def _now_iso():
     return datetime.utcnow().isoformat() + "Z"
 
 
-def _load_collections_store() -> list:
-    if not os.path.exists(COLLECTIONS_STORE_PATH):
-        return []
+def fetch_hasil_patologi_records(limit: int = 50) -> list:
+    if not supabase:
+        raise RuntimeError("Supabase service is not configured.")
 
+    query = supabase.table("hasil_patologi").select("*")
     try:
-        with open(COLLECTIONS_STORE_PATH, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-            return data if isinstance(data, list) else []
-    except Exception as exc:
-        print(f"[collections] Failed to read store: {exc}")
-        return []
+        query = query.order("created_at", desc=True)
+    except TypeError:
+        pass
+
+    if limit is not None:
+        try:
+            query = query.limit(int(limit))
+        except (TypeError, ValueError):
+            pass
+
+    response = query.execute()
+    return list(response.data or [])
 
 
-def _save_collections_store(records: list) -> None:
-    try:
-        with open(COLLECTIONS_STORE_PATH, "w", encoding="utf-8") as handle:
-            json.dump(records, handle, indent=2, ensure_ascii=False)
-    except Exception as exc:
-        print(f"[collections] Failed to write store: {exc}")
-        raise
+def fetch_hasil_patologi_record(record_id: str) -> dict | None:
+    if not supabase:
+        raise RuntimeError("Supabase service is not configured.")
+
+    response = supabase.table("hasil_patologi").select("*").eq("id", record_id).limit(1).execute()
+    rows = response.data or []
+    return rows[0] if rows else None
 
 
 # =========================
@@ -75,8 +80,8 @@ SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Email configuration
-EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "akhmadyasin704@gmail.com")
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "hmbrsrcnlxjrcrvj")
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS", "pathonote.system@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "oaugpypsyhweocdj")
 EMAIL_SMTP_SERVER = os.environ.get("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
 
@@ -270,6 +275,47 @@ def format_summary_fields(structured_data: dict, raw_text: str | None = None) ->
     return "Ringkasan belum tersedia."
 
 
+def generate_nomor_pa() -> str:
+    """Buat nomor PA otomatis dengan format PA.YY.0001, misalnya PA.26.0001."""
+    current_year = datetime.now().year
+    year_suffix = str(current_year)[-2:]
+    prefix = f"PA.{year_suffix}."
+
+    if not supabase:
+        return f"{prefix}0001"
+
+    try:
+        response = supabase.table("hasil_patologi").select("nomor_pa").execute()
+        highest_sequence = 0
+
+        for item in response.data or []:
+            value = str(item.get("nomor_pa") or "").strip()
+            if not value:
+                continue
+
+            match = re.fullmatch(r"PA\.(\d{2}|\d{4})\.(\d{4})", value, re.IGNORECASE)
+            if not match:
+                continue
+
+            year_part = match.group(1)
+            sequence_part = int(match.group(2))
+            if len(year_part) == 2:
+                if int(year_part) != int(year_suffix):
+                    continue
+            else:
+                if int(year_part) != current_year:
+                    continue
+
+            if sequence_part > highest_sequence:
+                highest_sequence = sequence_part
+
+        next_sequence = highest_sequence + 1
+        return f"{prefix}{next_sequence:04d}"
+    except Exception as exc:
+        print(f"[generate_nomor_pa] Failed to generate number: {exc}")
+        return f"{prefix}0001"
+
+
 # ---------- Helper function untuk mengirim email ----------
 def send_email_smtp(to_email: str, subject: str, body: str, is_html: bool = False) -> tuple[bool, str]:
     """
@@ -418,6 +464,92 @@ def get_user_from_access_token(access_token: str):
     with urlopen(request_obj) as response:
         return json.load(response)
 
+@app.route('/api/admin/users', methods=['GET'])
+def list_admin_users():
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"error": "Access token is required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[list_admin_users] Error verifying current user: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to verify current user."}), 500
+
+    user_meta = current_user.get('user_metadata') or {}
+    raw_meta = current_user.get('raw_user_meta_data') or {}
+    app_meta = current_user.get('app_metadata') or {}
+    current_role = (user_meta.get('role') or raw_meta.get('role') or app_meta.get('role') or '').lower()
+
+    if current_role != 'superadmin':
+        print(f"[list_admin_users] Authenticated user {current_user.get('email')} is not marked as superadmin in metadata; proceeding with service-role lookup for compatibility.")
+
+    try:
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users"
+        headers = {
+            "apiKey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+        }
+        request_obj = Request(url, headers=headers, method='GET')
+        with urlopen(request_obj) as response:
+            data = json.load(response)
+
+        if isinstance(data, dict) and 'users' in data:
+            data = data.get('users') or []
+
+        users = []
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+            meta = item.get('user_metadata') or {}
+            raw_meta_item = item.get('raw_user_meta_data') or {}
+            merged = {**raw_meta_item, **meta}
+            users.append({
+                "id": item.get('id'),
+                "email": item.get('email'),
+                "username": merged.get('username') or '',
+                "display_name": merged.get('display_name') or '',
+                "role": str(merged.get('role') or '').lower() or 'dokter',
+                "created_at": item.get('created_at'),
+                "last_sign_in_at": item.get('last_sign_in_at'),
+                "email_confirmed_at": item.get('email_confirmed_at'),
+            })
+
+        return jsonify({"users": users})
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[list_admin_users] Unexpected error: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to list users."}), 500
+
 @app.route('/api/admin/create-user', methods=['POST'])
 def create_user_admin():
     if not supabase:
@@ -464,22 +596,17 @@ def create_user_admin():
     if not email or not password or not username or not new_role:
         return jsonify({"error": "email, password, username, and role are required."}), 400
 
-    if new_role not in {'dokter', 'petugas'}:
+    if new_role in {'dokter_patologi', 'dokter'}:
+        new_role = 'dokter'
+    elif new_role not in {'dokter', 'petugas'}:
         return jsonify({"error": "role must be either 'dokter' or 'petugas'."}), 400
 
     try:
-        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users"
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/signup"
         body = {
             "email": email,
             "password": password,
-            "email_confirm": True,
-            "user_metadata": {
-                "username": username,
-                "display_name": display_name,
-                "summary_mode": "patologi",
-                "role": new_role,
-            },
-            "raw_user_meta_data": {
+            "data": {
                 "username": username,
                 "display_name": display_name,
                 "summary_mode": "patologi",
@@ -495,15 +622,55 @@ def create_user_admin():
         with urlopen(request_obj) as response:
             created_user = json.load(response)
 
-        return jsonify({
+        new_user_id = created_user.get('id') or created_user.get('user', {}).get('id')
+        new_user_email = created_user.get('email') or created_user.get('user', {}).get('email')
+
+        # Attempt to send a manual notification email from the backend SMTP account
+        email_sent = False
+        email_message = ""
+        if new_user_email:
+            subject = "Akun PathoNote Anda Telah Dibuat"
+            body = (
+                f"Halo {display_name},\n\n"
+                "Akun PathoNote Anda telah dibuat oleh Superadmin.\n\n"
+                f"Email: {new_user_email}\n"
+                f"Role: {new_role}\n\n"
+                "Silakan cek kotak masuk atau folder spam untuk email konfirmasi Supabase. "
+                "Jika email konfirmasi belum tiba, Anda dapat menggunakan halaman login dan meminta link reset password jika perlu.\n\n"
+                "Terima kasih,\nTim PathoNote"
+            )
+            try:
+                success, message = send_email_smtp(new_user_email, subject, body, False)
+                email_sent = success
+                email_message = message
+            except Exception as e:
+                print(f"[create_user_admin] Failed to send notification email: {e}")
+                traceback.print_exc()
+                email_message = str(e)
+
+        # Log creation activity: actor=current_user
+        try:
+            actor_id = current_user.get('id')
+            actor_email = current_user.get('email') or (user_meta.get('email') if user_meta else '')
+            log_pengiriman_history(None, actor_id, actor_email, "create_user", "", "success")
+        except Exception as e:
+            print(f"[create_user_admin] Failed to log activity: {e}")
+
+        response_payload = {
             "success": True,
             "user": {
-                "id": created_user.get('id'),
-                "email": created_user.get('email'),
+                "id": new_user_id,
+                "email": new_user_email,
                 "user_metadata": created_user.get('user_metadata') or {},
                 "raw_user_meta_data": created_user.get('raw_user_meta_data') or {},
+            },
+            "email_notification": {
+                "sent": email_sent,
+                "message": email_message,
             }
-        })
+        }
+
+        return jsonify(response_payload)
     except HTTPError as e:
         try:
             body = e.read().decode('utf-8')
@@ -518,6 +685,80 @@ def create_user_admin():
         print(f"[create_user_admin] Unexpected error: {type(e).__name__}: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to create the user."}), 500
+
+@app.route('/api/admin/delete-user/<user_id>', methods=['DELETE'])
+def delete_user_admin(user_id):
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"error": "Access token is required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[delete_user_admin] Error verifying current user: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to verify current user."}), 500
+
+    user_meta = current_user.get('user_metadata') or {}
+    raw_meta = current_user.get('raw_user_meta_data') or {}
+    current_role = (user_meta.get('role') or raw_meta.get('role') or '').lower()
+    if current_role != 'superadmin':
+        return jsonify({"error": "Only superadmin users may delete accounts."}), 403
+
+    try:
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{user_id}"
+        headers = {
+            "apiKey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+        }
+        request_obj = Request(url, headers=headers, method='DELETE')
+        with urlopen(request_obj) as response:
+            body = response.read().decode('utf-8')
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                data = {}
+
+        try:
+            actor_id = current_user.get('id')
+            actor_email = current_user.get('email') or (user_meta.get('email') if user_meta else '')
+            log_pengiriman_history(None, actor_id, actor_email, "delete_user", "", "success")
+        except Exception as e:
+            print(f"[delete_user_admin] Failed to log activity: {e}")
+
+        return jsonify({"success": True, "deleted_user_id": user_id, "detail": data})
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[delete_user_admin] Unexpected error: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to delete user."}), 500
 
 @app.route('/api/user-meta/<user_id>', methods=['GET'])
 def get_user_meta(user_id):
@@ -558,114 +799,95 @@ def get_user_meta(user_id):
 
 @app.route('/api/collections', methods=['POST'])
 def create_collection():
-    payload = request.get_json(silent=True) or {}
-
-    if not payload:
-        return jsonify({"success": False, "error": "Request body cannot be empty."}), 400
-
-    collection_id = str(payload.get("collection_id") or uuid.uuid4())
-    created_at = _now_iso()
-
-    record = {
-        "id": collection_id,
-        "created_at": created_at,
-        "updated_at": created_at,
-        "status": "received",
-        "status_message": "Data berhasil diterima oleh API Anda.",
-        "source": payload.get("source") or "app",
-        "payload": payload,
-        "metadata": {
-            "received_via": "POST /api/collections",
-            "can_be_pulled_by_rs": True,
-        },
-    }
-
-    records = _load_collections_store()
-    records.insert(0, record)
-    _save_collections_store(records)
-
-    try:
-        record_payload = payload.get("record") or {}
-        petugas_id = payload.get("petugas_id") or payload.get("user_id")
-        if petugas_id is not None and not str(petugas_id).strip():
-            petugas_id = None
-
-        log_pengiriman_history(
-            payload.get("report_id") or payload.get("collection_id") or record_payload.get("id"),
-            petugas_id,
-            payload.get("nama_petugas") or record_payload.get("nama_petugas") or "System",
-            payload.get("metode_pengiriman") or "api",
-            payload.get("tujuan_pengiriman") or "API RS",
-            "success",
-        )
-    except Exception as exc:
-        print(f"[collections] Failed to log history: {exc}")
-
     return jsonify({
-        "success": True,
-        "message": "Collection berhasil disimpan.",
-        "collection": record,
-    }), 201
+        "success": False,
+        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+    }), 410
 
 
 @app.route('/api/collections', methods=['GET'])
 def list_collections():
-    records = _load_collections_store()
-    status_filter = request.args.get("status", "").strip().lower()
+    return jsonify({
+        "success": False,
+        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+    }), 410
 
-    if status_filter:
-        records = [item for item in records if (item.get("status") or "").lower() == status_filter]
 
+@app.route('/api/collections/<collection_id>', methods=['GET'])
+def get_collection_detail(collection_id):
+    return jsonify({
+        "success": False,
+        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+    }), 410
+
+
+@app.route('/api/collections/<collection_id>/status', methods=['PATCH'])
+def update_collection_status(collection_id):
+    return jsonify({
+        "success": False,
+        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+    }), 410
+
+
+@app.route('/api/hasil-patologi', methods=['GET'])
+def list_hasil_patologi():
     limit = request.args.get("limit", "50")
     try:
         limit_value = max(1, min(int(limit), 200))
     except ValueError:
         limit_value = 50
 
+    try:
+        records = fetch_hasil_patologi_records(limit=limit_value)
+    except Exception as exc:
+        print(f"[hasil_patologi] Failed to fetch records: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
     return jsonify({
         "success": True,
-        "count": len(records[:limit_value]),
-        "collections": records[:limit_value],
+        "count": len(records),
+        "records": records,
     })
 
 
-@app.route('/api/collections/<collection_id>', methods=['GET'])
-def get_collection_detail(collection_id):
-    records = _load_collections_store()
-    record = next((item for item in records if item.get("id") == collection_id), None)
+@app.route('/api/hasil-patologi/<record_id>', methods=['GET'])
+def get_hasil_patologi_detail(record_id):
+    try:
+        record = fetch_hasil_patologi_record(record_id)
+    except Exception as exc:
+        print(f"[hasil_patologi] Failed to fetch record {record_id}: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
 
     if not record:
-        return jsonify({"success": False, "error": "Collection tidak ditemukan."}), 404
+        return jsonify({"success": False, "error": "Record tidak ditemukan."}), 404
 
-    return jsonify({"success": True, "collection": record})
+    return jsonify({"success": True, "record": record})
 
 
-@app.route('/api/collections/<collection_id>/status', methods=['PATCH'])
-def update_collection_status(collection_id):
-    payload = request.get_json(silent=True) or {}
-    new_status = (payload.get("status") or "").strip()
+@app.route('/api/hasil-patologi/<record_id>', methods=['DELETE'])
+def delete_hasil_patologi(record_id):
+    try:
+        if not supabase:
+            return jsonify({"success": False, "error": "Supabase service is not configured."}), 500
 
-    if not new_status:
-        return jsonify({"success": False, "error": "Field 'status' wajib diisi."}), 400
+        try:
+            history_response = supabase.table("history_pengiriman").select("id, hasil_patologi_id").execute()
+            history_rows = history_response.data or []
+            for row in history_rows:
+                if row.get("hasil_patologi_id") == record_id:
+                    supabase.table("history_pengiriman").delete().eq("id", row.get("id")).execute()
+        except Exception as history_exc:
+            print(f"[hasil_patologi] History cleanup skipped: {history_exc}")
 
-    records = _load_collections_store()
-    record = next((item for item in records if item.get("id") == collection_id), None)
+        delete_response = supabase.table("hasil_patologi").delete().eq("id", record_id).execute()
+        if getattr(delete_response, "error", None):
+            return jsonify({"success": False, "error": delete_response.error.message}), 400
 
-    if not record:
-        return jsonify({"success": False, "error": "Collection tidak ditemukan."}), 404
-
-    record["status"] = new_status
-    record["updated_at"] = _now_iso()
-    record["status_message"] = payload.get("message") or f"Status diperbarui menjadi {new_status}."
-    record.setdefault("history", []).append({
-        "timestamp": _now_iso(),
-        "status": new_status,
-        "message": record["status_message"],
-    })
-
-    _save_collections_store(records)
-
-    return jsonify({"success": True, "message": "Status collection berhasil diperbarui.", "collection": record})
+        return jsonify({"success": True, "deleted": True}), 200
+    except Exception as exc:
+        print(f"[hasil_patologi] Failed to delete record {record_id}: {exc}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.route('/process-report', methods=['POST'])
@@ -681,6 +903,10 @@ def process_report():
     # 2. Siapkan Payload Lengkap sesuai Tabel SQL
     # Kita bagi jadi beberapa bagian agar rapi
     
+    requested_nomor_pa = str(data.get("nomor_pa") or "").strip()
+    if not requested_nomor_pa or requested_nomor_pa == "000000":
+        requested_nomor_pa = generate_nomor_pa()
+
     final_payload = {
         "user_id": user_id,
         
@@ -690,7 +916,7 @@ def process_report():
         "waktu": datetime.now().strftime("%H:%M:%S"),
         "jenis_pemeriksaan": 1,
         "id_simgos": "layanan.laboratorium.pa.hasil.Model-3", # Sesuai format JSON RS kamu
-        "nomor_pa": data.get("nomor_pa", "000000"),
+        "nomor_pa": requested_nomor_pa,
         "pa_sebelumnya": "",
         "asisten": data.get("asisten", "AI-PathoNote"),
         "dokter": 14, # Hardcoded Jazay / Bisa ambil dari profil
@@ -1075,6 +1301,20 @@ def api_test_email():
         error_msg = f"{type(e).__name__}: {str(e)}"
         print(f"[/api/test-email] EXCEPTION: {error_msg}")
         return jsonify({"status": "error", "message": error_msg}), 500
+
+
+@app.route("/api/log-activity", methods=["POST"])
+def api_log_activity():
+    """Compatibility endpoint for activity logging. It no longer writes to history_pengiriman."""
+    try:
+        if not supabase:
+            return jsonify({"status": "error", "message": "Supabase not configured"}), 500
+
+        return jsonify({"status": "success", "message": "activity logging disabled"}), 200
+    except Exception as e:
+        print(f"[/api/log-activity] EXCEPTION: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # ---------- STREAM summarize (SocketIO) ----------

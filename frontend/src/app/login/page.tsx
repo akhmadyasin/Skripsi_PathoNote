@@ -100,12 +100,21 @@ export default function LoginPage() {
 
           <p className="muted center">
             Account creation is restricted. Please ask your Superadmin to create a user for you.
+            <br />
+            <a
+              href="https://wa.me/6289512853891?text=Halo%20Superadmin%2C%20saya%20ingin%20meminta%20dibuatkan%20akun%20untuk%20mengakses%20aplikasi%20PathoNote."
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: '#38b6ff', fontWeight: 600, textDecoration: 'none' }}
+            >
+              Contact Superadmin
+            </a>
           </p>
         </div>
       </div>
 
       <div className="image-side">
-        <img src="/login.jpg" alt="Login Illustration" />
+        <img src="/login.png" alt="Login Illustration" />
       </div>
     </div>
   );

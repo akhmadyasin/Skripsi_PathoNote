@@ -1,7 +1,6 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css"; // layout (sidebar/topbar)
@@ -77,7 +76,7 @@ export default function SettingsPage() {
 
   // status
   const [aiStatus, setAiStatus] = useState<"active" | "inactive">("active");
-  const [storageText, setStorageText] = useState<string>("—");
+  const [storageText, setStorageText] = useState<string>("â€”");
 
   // toast
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -112,7 +111,7 @@ export default function SettingsPage() {
       // Kalau kamu punya API health, ganti ke endpoint kamu:
       // const res = await fetch("/api/health");
       // setAiStatus(res.ok ? "active" : "inactive");
-      // Untuk sekarang, kita coba ping root (akan gagal di dev → jadi "inactive")
+      // Untuk sekarang, kita coba ping root (akan gagal di dev â†’ jadi "inactive")
       const res = await fetch("/", { method: "HEAD" });
       setAiStatus(res.ok ? "active" : "inactive");
     } catch {
@@ -386,111 +385,13 @@ export default function SettingsPage() {
     );
   }
 
+
   return (
-    <div className={s.app}>
-      {/* SIDEBAR */}
-      <aside className={s.sidebar}>
-        <div className={s.sbInner}>
-          <div className={s.brand}>
-            <Image src="/logo_neurabot.jpg" alt="Logo Neurabot" width={36} height={36} className={s.brandImg} />
-            <div className={s.brandName}>PathoNote</div>
-          </div>
-
-          <nav className={s.nav} aria-label="Sidebar">
-            <a className={s.navItem} href="/dashboard">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                <polyline points="9,22 9,12 15,12 15,22"></polyline>
-              </svg>
-              <span>Dashboard</span>
-            </a>
-            <a className={s.navItem} href="/collections">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,6 12,12 16,14"></polyline>
-              </svg>
-              <span>Collections</span>
-            </a>
-            <a className={s.navItem} href="/history">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,8 12,12 15,15"></polyline>
-              </svg>
-              <span>History</span>
-            </a>
-            <a className={`${s.navItem} ${s.active}`} href="/settings">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg>
-              <span>Settings</span>
-            </a>
-          </nav>
-
-          <div className={s.sbFooter}>
-            <div style={{ opacity: 0.6 }}>© Universitas Harkat Negeri | Developed by Akhmad Yasin</div>
-            <div style={{ opacity: 0.6 }}>© 2025 Neurabot | Base on initial development</div>
-          </div>
-        </div>
-      </aside>
-
-      {/* TOPBAR */}
-      <header className={s.topbar}>
-        <div className={s.tbWrap}>
-          <div className={s.leftGroup}>
-            <div className={s.search} role="search">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-              </svg>
-              <input
-                type="search"
-                placeholder="Search settings..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search settings"
-              />
-            </div>
-          </div>
-
-          <div className={s.rightGroup}>
-            <div className={s.avatar} onClick={toggleProfileDropdown}>
-              <Image src={avatar} alt="Foto profil" width={36} height={36} unoptimized />
-              <div className={s.meta}>
-                <div className={s.name}>{username}</div>
-              </div>
-              
-              {showProfileDropdown && (
-                <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={openProfileModal}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                    Profile
-                  </button>
-                  <button className={s.dropdownItem} onClick={onLogout}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                      <polyline points="16,17 21,12 16,7"></polyline>
-                      <line x1="21" y1="12" x2="9" y2="12"></line>
-                    </svg>
-                    Logout
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <>
       {/* CONTENT */}
       <main className={s.content}>
         <div className={h.settingsContainer}>
-          <div className={h.settingsHeader}>
-            <h2 className={h.pageTitle}>Settings</h2>
-            <p className={h.settingsSubtitle}>Kelola tanda tangan Anda dan cek informasi sistem AI yang sedang digunakan.</p>
-          </div>
+          <div className={h.settingsHeader} />
 
           <section className={h.section}>
             <h3 className={h.sectionTitle}>Tanda Tangan</h3>
@@ -602,61 +503,6 @@ export default function SettingsPage() {
           {toast.msg}
         </div>
       )}
-
-      {/* Profile Modal */}
-      {showProfileModal && (
-        <div className={s.profileModalOverlay} onClick={closeProfileModal}>
-          <div className={s.profileModal} onClick={(event) => event.stopPropagation()}>
-            <div className={s.profileModalHeader}>
-              <div>
-                <h2>Edit Profil</h2>
-                <p className={s.profileModalNotice}>Nama dan email diambil dari akun Supabase Anda.</p>
-              </div>
-              <button className={s.modalClose} onClick={closeProfileModal} aria-label="Tutup">×</button>
-            </div>
-
-            <div className={s.profileModalBody}>
-              <label className={s.formRow}>
-                <span>Nama</span>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="Nama tampil"
-                />
-              </label>
-              <label className={s.formRow}>
-                <span>Email</span>
-                <input
-                  type="email"
-                  value={profileEmail}
-                  onChange={(e) => setProfileEmail(e.target.value)}
-                  placeholder="Email"
-                />
-              </label>
-              <label className={s.formRow}>
-                <span>Role</span>
-                <input type="text" value={(meta.role as string) || ''} readOnly disabled />
-              </label>
-            </div>
-
-            {profileStatus && (
-              <div className={profileStatus.type === "error" ? s.profileError : s.profileSuccess}>
-                {profileStatus.message}
-              </div>
-            )}
-
-            <div className={s.profileModalFooter}>
-              <button className={s.buttonSecondary} onClick={closeProfileModal} type="button">
-                Batal
-              </button>
-              <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
-                {isSavingProfile ? "Menyimpan..." : "Simpan"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

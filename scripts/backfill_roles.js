@@ -47,7 +47,7 @@ async function listUsers(page = 1, perPage = 100) {
 }
 
 function deriveRoleFromMetadata(user) {
-  return 'dokter_patologi';
+  return 'dokter';
 }
 
 (async () => {

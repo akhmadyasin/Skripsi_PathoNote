@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { format } from 'date-fns';
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css"; // reuse layout styles
 import h from "@/app/styles/collections.module.css";   // styles khusus collections
+import { getSessionUserProfile } from '@/app/lib/userProfile';
 
 type UserMeta = {
   username?: string;
@@ -250,6 +250,15 @@ export default function CollectionsPage() {
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<CollectionItem[]>(SAMPLE);
 
+  // Initialize query from URL search param so topbar search navigates here
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('search') || '';
+      if (q) setQuery(q);
+    } catch {}
+  }, []);
+
   // Preload user metadata for items' owners when items change
   useEffect(() => {
     const ids = Array.from(new Set(items.map((it) => it.user_id).filter(Boolean)));
@@ -270,14 +279,13 @@ export default function CollectionsPage() {
         return;
       }
       setEmail(session.user.email || "");
-      const sessionMeta = (session.user.user_metadata as UserMeta) || {};
-      setMeta(sessionMeta);
-      const effectiveRole = ((session.user.user_metadata as any)?.role || 'dokter').toString().toLowerCase();
-      setUserRole(effectiveRole);
+      const profile = getSessionUserProfile(session as any);
+      setMeta(profile.meta || {});
+      setUserRole(profile.role || 'dokter');
       const decoded = decodeJwtPayload(session.access_token);
       const tokenClaimRole = ((decoded as any)?.role || '').toString().toLowerCase();
       setTokenRole(tokenClaimRole);
-      const isPetugas = effectiveRole === 'petugas';
+      const isPetugasOrSuperadmin = (profile.role === 'petugas' || profile.role === 'superadmin');
       // fetch user summaries from Supabase (only for authenticated user)
       try {
         const userId = session.user.id;
@@ -287,16 +295,18 @@ export default function CollectionsPage() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (userId && !isPetugas) query = query.eq('user_id', userId) as any;
+        // Dokter should only see their own pathology records.
+        if (profile.role === 'dokter') {
+          query = query.eq('user_id', userId);
+        }
 
         console.debug('Collections fetch', {
           userId,
-          effectiveRole,
+          role: profile.role,
           tokenClaimRole,
-          isPetugas,
-          sessionMeta,
-          decodedJwtRole: tokenClaimRole,
-          query: userId && !isPetugas ? 'own records only' : 'all records',
+          isPetugasOrSuperadmin,
+          sessionMeta: profile.meta,
+          query: profile.role === 'dokter' ? 'own records only' : 'all records',
         });
 
         const { data, error } = await query;
@@ -350,6 +360,136 @@ export default function CollectionsPage() {
         .some((value) => String(value).toLowerCase().includes(q))
     );
   }, [items, query]);
+
+  // Split by status_pengiriman: ready vs others (waiting)
+  const waitingItems = filtered.filter((it) => String(it.status_pengiriman || '').toLowerCase().trim() !== 'ready');
+  const readyItems = filtered.filter((it) => String(it.status_pengiriman || '').toLowerCase().trim() === 'ready');
+
+  const updateStatusPengiriman = async (id: string, status: string) => {
+    // optimistic update
+    const prev = items;
+    setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: status } : it)));
+    try {
+      const { data, error } = await supabase
+        .from('hasil_patologi')
+        .update({ status_pengiriman: status })
+        .eq('id', id)
+        .select('id, status_pengiriman') as any;
+
+      if (error) throw error;
+      // refresh local item with returned value if provided
+      if (data && Array.isArray(data) && data[0]) {
+        const updated = data[0];
+        setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: updated.status_pengiriman } : it)));
+      }
+    } catch (err: any) {
+      alert('Gagal memperbarui status: ' + (err?.message || String(err)));
+      setItems(prev);
+    }
+  };
+
+  const renderCard = (it: CollectionItem) => (
+    <article key={it.id} className={h.historyCard}>
+      <div className={h.cardHeader}>
+        <div className={h.cardDate}>
+          <span className={h.dateIcon}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+          </span>
+          {formatItemDate(it)}
+        </div>
+        <div className={h.cardTopActions}>
+          {tokenRole !== 'authenticated' && (
+            <button className={h.exportBtn} onClick={() => alert('Export functionality coming soon!')} title="Export">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7,10 12,15 17,10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+          )}
+
+        </div>
+      </div>
+
+      <div className={h.cardContent}>
+        <div>
+          <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
+            [{it.nomor_pa || 'AUTO'}] - {it.jaringan || it.lokasi || '-'}
+          </div>
+          <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+            <strong>Oleh:</strong> {userMetaMap[it.user_id]?.username || it.user_id || '-'}
+          </div>
+          <div className={h.summary} style={{ marginBottom: 8 }}>
+            <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}
+          </div>
+          <div className={h.itemDate}>
+            {formatItemDate(it) || '-'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+            <div style={{ background: (String(it.status_pengiriman || '').toLowerCase() === 'ready' ? '#e6ffed' : '#fff7e6'), padding: '4px 8px', borderRadius: 6, fontSize: 12 }}>
+              <strong>Status Kirim:</strong> {String(it.status_pengiriman || 'pending')}
+            </div>
+              {userRole === 'petugas' && (() => {
+                const st = String(it.status_pengiriman || '').toLowerCase().trim();
+                return (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {st !== 'ready' && (
+                      <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => updateStatusPengiriman(it.id, 'ready')}>
+                        Set Ready
+                      </button>
+                    )}
+                    {st === 'ready' && (
+                      <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => updateStatusPengiriman(it.id, 'pending')}>
+                        Set Pending
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+          </div>
+        </div>
+      </div>
+
+      <div className={h.cardActions}>
+        <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
+          <span className={h.btnIcon}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </span>
+          View Details
+        </button>
+        <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(getReportText(it))}>
+          <span className={h.btnIcon}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+            </svg>
+          </span>
+          Copy
+        </button>
+        {userRole !== 'superadmin' && (
+          <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
+          <span className={h.btnIcon}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3,6 5,6 21,6"></polyline>
+              <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+          </span>
+          Delete
+          </button>
+        )}
+      </div>
+    </article>
+  );
 
   const handleCopy = async (text: string) => {
     try {
@@ -454,150 +594,28 @@ export default function CollectionsPage() {
 
   if (loading) {
     return (
-      <div className={s.app}>
-        <main className={s.content}>
-          <div className={s.card}>Loading collections...</div>
-        </main>
-      </div>
+      <main className={s.content}>
+        <div className={s.card}>Loading collections...</div>
+      </main>
     );
   }
 
   return (
-    <div className={s.app}>
-      {/* SIDEBAR */}
-      <aside className={s.sidebar}>
-        <div className={s.sbInner}>
-          <div className={s.brand}>
-            <Image
-              src="/logo_neurabot.jpg"
-              alt="Logo Neurabot"
-              width={36}
-              height={36}
-              className={s.brandImg}
-            />
-            <div className={s.brandName}>PathoNote</div>
-          </div>
-
-          <nav className={s.nav} aria-label="Sidebar">
-            <a className={s.navItem} href="/dashboard">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                <polyline points="9,22 9,12 15,12 15,22"></polyline>
-              </svg>
-              <span>Dashboard</span>
-            </a>
-            <a className={`${s.navItem} ${s.active}`} href="/collections">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,6 12,12 16,14"></polyline>
-              </svg>
-              <span>Collections</span>
-            </a>
-            <a className={s.navItem} href="/history">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12,8 12,12 15,15"></polyline>
-              </svg>
-              <span>History</span>
-            </a>
-            <a className={s.navItem} href="/settings">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1 1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg>
-              <span>Settings</span>
-            </a>
-          </nav>
-
-          <div className={s.sbFooter}>
-            <div style={{ opacity: 0.6 }}>© Universitas Harkat Negeri | Developed by Akhmad Yasin</div>
-            <div style={{ opacity: 0.6 }}>© 2025 Neurabot | Base on initial development</div>
-          </div>
-        </div>
-      </aside>
-
-      {/* TOPBAR */}
-      <header className={s.topbar}>
-        <div className={s.tbWrap}>
-          <div className={s.leftGroup}>
-            <div className={s.search} role="search">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-              </svg>
-              <input
-                type="search"
-                placeholder="Search laporan..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search laporan"
-              />
-            </div>
-          </div>
-
-          <div className={s.rightGroup}>
-            <div className={s.avatar} onClick={toggleProfileDropdown}>
-              <Image
-                src={avatar}
-                alt="Foto profil"
-                width={36}
-                height={36}
-                unoptimized
-              />
-              <div className={s.meta}>
-                <div className={s.name}>{username}</div>
-              </div>
-              
-              {showProfileDropdown && (
-                <div className={s.profileDropdown}>
-                  <button className={s.dropdownItem} onClick={openProfileModal}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                      <circle cx="12" cy="7" r="4"></circle>
-                    </svg>
-                    Profile
-                  </button>
-                  <button className={s.dropdownItem} onClick={onLogout}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                      <polyline points="16,17 21,12 16,7"></polyline>
-                      <line x1="21" y1="12" x2="9" y2="12"></line>
-                    </svg>
-                    Logout
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
+    <>
       {/* CONTENT */}
-      <main className={s.content}>
-        <div className={h.historyContainer}>
+      <div className={h.historyContainer}>
           <div className={h.historyHeader}>
-            <h2 className={h.title}>Collections</h2>
-            <div style={{ marginTop: 8, fontSize: 14, color: '#666' }}>
-              Role saat ini: <strong>{userRole || 'memuat...'}</strong>
-              {userRole === 'petugas' ? ' — Menampilkan semua koleksi' : ' — Menampilkan koleksi milik Anda'}
-              <br />
-              JWT claim: <strong>{tokenRole || 'tidak ada'}</strong>
-              {userRole === 'petugas' && !tokenRole ? (
-                <div style={{ color: '#b33', marginTop: 4 }}>
-                  Token belum punya claim role. Coba logout/login lagi.
-                </div>
-              ) : null}
-            </div>
             <div className={h.headerActions}>
-              <button className={h.actionButton} onClick={() => alert('Export functionality coming soon!')}>
+              {(userRole !== 'superadmin' && tokenRole !== 'authenticated') && (
+                <button className={h.actionButton} onClick={() => alert('Export functionality coming soon!')}>
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7,10 12,15 17,10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
                 Export
-              </button>
-
+                </button>
+              )}
             </div>
           </div>
 
@@ -614,142 +632,24 @@ export default function CollectionsPage() {
               <p>Start using Voice to Text to see your pathology reports from Supabase here.</p>
             </div>
           ) : (
-            <div className={h.historyGrid}>
-              {filtered.map((it) => (
-                <article key={it.id} className={h.historyCard}>
-                  <div className={h.cardHeader}>
-                    <div className={h.cardDate}>
-                      <span className={h.dateIcon}>
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                          <line x1="16" y1="2" x2="16" y2="6"></line>
-                          <line x1="8" y1="2" x2="8" y2="6"></line>
-                          <line x1="3" y1="10" x2="21" y2="10"></line>
-                        </svg>
-                      </span>
-                      {formatItemDate(it)}
-                    </div>
-                    <div className={h.cardTopActions}>
-                      <button className={h.exportBtn} onClick={() => alert('Export functionality coming soon!')} title="Export">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                          <polyline points="7,10 12,15 17,10"></polyline>
-                          <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                      </button>
-
-                    </div>
-                  </div>
-
-                  <div className={h.cardContent}>
-              <div>
-                <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
-                  [{it.nomor_pa || 'AUTO'}] - {it.jaringan || it.lokasi || '-'}
-                </div>
-                <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
-                  <strong>Oleh:</strong> {userMetaMap[it.user_id]?.username || it.user_id || '-'}
-                </div>
-                <div className={h.summary} style={{ marginBottom: 8 }}>
-                  <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}
-                </div>
-                <div className={h.itemDate}>
-                  {formatItemDate(it) || '-'}
+            <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ marginTop: 6, marginBottom: 8 }}>Menunggu Review</h3>
+                <div className={h.historyGrid}>
+                  {waitingItems.map((it) => renderCard(it))}
                 </div>
               </div>
-            </div>
 
-            <div className={h.cardActions}>
-              <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
-                <span className={h.btnIcon}>
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </span>
-                View Details
-              </button>
-              <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(getReportText(it))}>
-                <span className={h.btnIcon}>
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                  </svg>
-                </span>
-                Copy
-              </button>
-              <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
-                <span className={h.btnIcon}>
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3,6 5,6 21,6"></polyline>
-                    <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-                    <line x1="10" y1="11" x2="10" y2="17"></line>
-                    <line x1="14" y1="11" x2="14" y2="17"></line>
-                  </svg>
-                </span>
-                Delete
-              </button>
-            </div>
-                </article>
-              ))}
+              <div style={{ flex: 1 }}>
+                <h3 style={{ marginTop: 6, marginBottom: 8 }}>Ready</h3>
+                <div className={h.historyGrid}>
+                  {readyItems.map((it) => renderCard(it))}
+                </div>
+              </div>
             </div>
           )}
         </div>
-      </main>
-
-      {/* Profile Modal */}
-      {showProfileModal && (
-        <div className={s.profileModalOverlay} onClick={closeProfileModal}>
-          <div className={s.profileModal} onClick={(event) => event.stopPropagation()}>
-            <div className={s.profileModalHeader}>
-              <div>
-                <h2>Edit Profil</h2>
-                <p className={s.profileModalNotice}>Nama dan email diambil dari akun Supabase Anda.</p>
-              </div>
-              <button className={s.modalClose} onClick={closeProfileModal} aria-label="Tutup">×</button>
-            </div>
-
-            <div className={s.profileModalBody}>
-              <label className={s.formRow}>
-                <span>Nama</span>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="Nama tampil"
-                />
-              </label>
-              <label className={s.formRow}>
-                <span>Email</span>
-                <input
-                  type="email"
-                  value={profileEmail}
-                  onChange={(e) => setProfileEmail(e.target.value)}
-                  placeholder="Email"
-                />
-              </label>
-              <label className={s.formRow}>
-                <span>Role</span>
-                <input type="text" value={(meta.role as string) || userRole || 'dokter'} readOnly disabled />
-              </label>
-            </div>
-
-            {profileStatus && (
-              <div className={profileStatus.type === "error" ? s.profileError : s.profileSuccess}>
-                {profileStatus.message}
-              </div>
-            )}
-
-            <div className={s.profileModalFooter}>
-              <button className={s.buttonSecondary} onClick={closeProfileModal} type="button">
-                Batal
-              </button>
-              <button className={s.buttonPrimary} onClick={saveProfile} type="button" disabled={isSavingProfile}>
-                {isSavingProfile ? "Menyimpan..." : "Simpan"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    </>
+    );
 }
+
