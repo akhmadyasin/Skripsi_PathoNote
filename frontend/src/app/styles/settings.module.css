@@ -137,13 +137,36 @@
 
 /* responsive */
 @media (max-width: 768px) {
-  .settingsContainer { padding: 0 4px; }
-  .header { padding: 18px; }
-  .title { font-size: 24px; }
-  .section { padding: 18px; min-height: auto; }
-  .item { flex-direction: column; align-items: flex-start; gap: 12px; }
-  .control { margin-left: 0; width: 100%; }
-  .rangeWrap { width: 100%; }
-  .actionsBar { flex-direction: column; gap: 12px; }
-  .btnReset { margin-right: 0; }
+  .settingsContainer {
+    padding: 0 16px 24px;
+  }
+  .header {
+    padding: 18px;
+  }
+  .title {
+    font-size: 24px;
+  }
+  .section {
+    padding: 18px 16px;
+    min-height: auto;
+  }
+  .item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .control {
+    margin-left: 0;
+    width: 100%;
+  }
+  .rangeWrap {
+    width: 100%;
+  }
+  .actionsBar {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .btnReset {
+    margin-right: 0;
+  }
 }

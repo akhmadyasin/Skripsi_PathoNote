@@ -39,7 +39,7 @@ const DEFAULTS: Settings = {
   autoVoiceDetection: true,
   noiseFilter: true,
 
-  aiModel: "llama-3.3-70b-versatile",
+  aiModel: "qwen3.6-27b",
   aiCreativity: 30,
   autoSummarize: true,
   summarizeDelay: 2,
@@ -489,7 +489,7 @@ export default function SettingsPage() {
               <div className={h.control}>
                 <span className={`${h.status} ${h.statusActive}`}>
                   <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><circle cx="12" cy="12" r="10" /></svg>
-                  {settings.aiModel || "llama-3.3-70b-versatile"}
+                  {settings.aiModel || "qwen3.6-27b"}
                 </span>
               </div>
             </div>

@@ -10,7 +10,7 @@
   background: #ffffff;
   color: #0b1622;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  overflow: hidden;
+  --topbar-height: 64px;
 }
 
 /* Sidebar */
@@ -21,9 +21,13 @@
   padding: 16px 12px;
   border-right: 1px solid #e5eaf1;
   overflow-y: auto;
-  position: sticky;
+  /* keep sidebar fixed on desktop so it doesn't scroll with content */
+  position: fixed;
   top: 0;
-  min-height: 100vh;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  z-index: 30;
 }
 .sbInner { display: flex; flex-direction: column; height: 100%; gap: 16px; }
 
@@ -53,7 +57,8 @@
   z-index: 20;
 }
 .tbWrap {
-  height: 64px; display: flex; align-items: center; justify-content: space-between;
+  height: var(--topbar-height);
+  display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px; gap: 12px;
 }
 
@@ -195,6 +200,7 @@
   min-height: 0;
   overflow-y: auto;
   min-width: 0;
+  /* topbar occupies the first grid row (64px); no extra top margin needed */
 }
 .cards {
   display: grid; gap: 16px;
@@ -227,7 +233,27 @@
 /* Responsive */
 @media (max-width: 1024px) {
   .app {
+    display: grid;
     grid-template-columns: 84px minmax(0, 1fr);
+    grid-template-rows: 64px minmax(0, 1fr);
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar content";
+  }
+  .sidebar {
+    width: 84px;
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+  }
+  .topbar {
+    left: 84px;
+  }
+  .content {
+    margin-left: 84px;
+    width: calc(100% - 84px);
   }
   /* keep brand name visible in sidebar */
   .navItem span { display: none; }
@@ -237,27 +263,75 @@
 
 @media (max-width: 768px) {
   .app {
+    display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    /* fixed topbar is removed from flow, keep its row height at zero */
+    grid-template-rows: 0 minmax(0, 1fr);
     grid-template-areas:
       "topbar"
-      "content"
-      "mobileNav";
+      "content";
+    padding-top: var(--topbar-height);
   }
-  .sidebar { display: none; }
-  .topbar { position: sticky; top: 0; }
-  .tbWrap { height: auto; padding: 12px 14px; flex-wrap: wrap; }
-  .leftGroup { flex: 1 1 100%; order: 2; }
-  .rightGroup { margin-left: auto; }
-  .search { width: 100%; }
-  .search input { min-width: 0; width: 100%; }
-  .listenBtn { padding: 8px 12px; font-size: 14px; height: 40px; }
-  .listenBtn .dot { display: inline-block; }
-  .listenBtn span { display: inline-block; }
-  .content { padding: 14px; }
-  .listenBtn .btnLabel { display: none; }
-  .meta { display: none; }
-  .profileDropdown { right: 0; left: auto; }
+  /* mobile: taller topbar for wrapped controls */
+  .app { --topbar-height: 120px; }
+  .sidebar {
+    display: none;
+    position: static;
+    width: 100%;
+  }
+  .topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+  .tbWrap {
+    height: var(--topbar-height);
+    padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+  .leftGroup {
+    flex: 1 1 100%;
+    order: 2;
+  }
+  .rightGroup {
+    margin-left: auto;
+  }
+  .search {
+    width: 100%;
+  }
+  .search input {
+    min-width: 0;
+    width: 100%;
+  }
+  .listenBtn {
+    padding: 8px 12px;
+    font-size: 14px;
+    height: 40px;
+  }
+  .listenBtn .dot {
+    display: inline-block;
+  }
+  .listenBtn span {
+    display: inline-block;
+  }
+  .content {
+    padding: 18px 14px 14px;
+    margin-left: 0;
+    margin-top: 0;
+    height: calc(100vh - var(--topbar-height));
+    width: 100%;
+  }
+  .listenBtn .btnLabel {
+    display: none;
+  }
+  .meta {
+    display: none;
+  }
+  .profileDropdown {
+    right: 0;
+    left: auto;
+  }
 }
 
 .mobileNav {
@@ -336,7 +410,7 @@
   overflow-y: auto;
   transition: transform 0.3s ease;
   transform: translateX(-100%);
-  padding-top: 64px;
+  padding-top: var(--topbar-height);
 }
 
 .mobileSidebarDrawer.mobileSidebarOpen {
@@ -399,8 +473,10 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
+  /* use full available width inside the content area */
+  max-width: none;
+  width: 100%;
+  margin: 0;
   padding: 0 16px;
 }
 

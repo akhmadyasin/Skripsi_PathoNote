@@ -401,6 +401,10 @@
 }
 
 @media (max-width: 768px) {
+  .historyContainer {
+    padding: 0 16px 24px;
+  }
+
   .container {
     padding: 18px 10px;
   }

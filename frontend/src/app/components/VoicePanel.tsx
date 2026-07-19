@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { io, Socket } from "socket.io-client";
 import { diffWords } from "diff";
-import "../styles/voice.css";
 
 type ToastType = "success" | "error" | "info";
 type Maybe<T> = T | null;
@@ -288,7 +287,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       const recognition = new SpeechRecognition();
       recognition.lang = "id-ID";
       recognition.continuous = true;
-      recognition.interimResults = true;
+      recognition.interimResults = false;
       
       recognition.onresult = (event: any) => {
         let interim = "";
@@ -312,19 +311,36 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       };
       
       recognition.onstart = () => setIsListening(true);
+      
       recognition.onend = () => {
-        setIsListening(false);
+        // Jangan langsung matikan isListening jika kita berniat me-restart secara otomatis
         if (recognitionRef.current && !recognitionRef.current.isManuallyStopped) {
-          try {
-            recognition.start();
-          } catch (err) {
-            console.error("SpeechRecognition restart failed:", err);
-          }
+          // Beri jeda 400ms agar OS HP punya waktu untuk menutup session mik lama 
+          // dan mencegah efek loop feedback suara 'beep' bawaan HP
+          setTimeout(() => {
+            if (recognitionRef.current && !recognitionRef.current.isManuallyStopped) {
+              try {
+                recognition.start();
+                setIsListening(true);
+              } catch (err) {
+                console.error("SpeechRecognition restart failed:", err);
+              }
+            }
+          }, 400);
+        } else {
+          setIsListening(false);
         }
       };
+      
       recognition.onerror = (event: any) => {
         const errorCode = event?.error || "unknown";
         console.error("SpeechRecognition error:", errorCode, event);
+        
+        // JANGAN langsung matikan mik jika error-nya cuma 'no-speech' (user diam terlalu lama di HP)
+        if (errorCode === "no-speech") {
+          return; 
+        }
+
         setIsListening(false);
         if (recognitionRef.current) recognitionRef.current.isManuallyStopped = true;
 
@@ -339,7 +355,15 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       alert("Browser Anda tidak mendukung Web Speech API. Coba gunakan Google Chrome.");
     }
     
-    return () => { socket.disconnect(); };
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.isManuallyStopped = true;
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      socket.disconnect();
+    };
   }, []);
 
   const clearSessionState = () => {

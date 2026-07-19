@@ -393,6 +393,7 @@ const styles = {
   },
   table: {
     width: "100%",
+    minWidth: 720,
     borderCollapse: "collapse" as const,
   },
   th: {
@@ -404,6 +405,7 @@ const styles = {
     fontWeight: 700,
     textTransform: "uppercase" as const,
     letterSpacing: "0.04em",
+    whiteSpace: "nowrap" as const,
   },
   td: {
     padding: "14px",
@@ -411,5 +413,8 @@ const styles = {
     fontSize: 14,
     color: "#334155",
     verticalAlign: "top" as const,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden" as const,
+    textOverflow: "ellipsis" as const,
   },
 };

@@ -49,17 +49,6 @@ const links = [
       </svg>
     ),
   },
-  {
-    href: "/users",
-    label: "Users",
-    icon: (
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
-        <circle cx="9.5" cy="7" r="3" />
-        <path d="M17 8l2 2 4-4" />
-      </svg>
-    ),
-  },
 ];
 
 export default function MobileSidebar({ currentPath }: MobileSidebarProps) {
