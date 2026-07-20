@@ -287,23 +287,30 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       const recognition = new SpeechRecognition();
       recognition.lang = "id-ID";
       recognition.continuous = true;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       
       recognition.onresult = (event: any) => {
         let interim = "";
+        let newFinalText = "";
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const chunk = event.results[i][0].transcript || "";
           const normalizedChunk = replaceSpokenPunctuation(chunk);
+          
           if (event.results[i].isFinal) {
             handleVoiceCommand(normalizedChunk);
             if (!isTranscriptionPausedRef.current) {
-              fullTranscriptRef.current += normalizedChunk + " ";
+              newFinalText += normalizedChunk + " ";
             }
           } else if (!isTranscriptionPausedRef.current) {
             interim += chunk;
           }
         }
+
         if (!isTranscriptionPausedRef.current) {
+          if (newFinalText) {
+            fullTranscriptRef.current += newFinalText;
+          }
           const currentTranscript = fullTranscriptRef.current + interim;
           setTranscript(currentTranscript);
           scheduleAutoSummarize(currentTranscript);
