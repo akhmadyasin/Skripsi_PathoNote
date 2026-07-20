@@ -437,7 +437,7 @@ export default function HistoryPage() {
                     {previewCreatorMeta && (
                       <div>
                         <strong>Dibuat Oleh</strong>
-                        <p>{previewCreatorMeta.display_name || previewCreatorMeta.username || previewCreatorMeta?.email || '-'}</p>
+                        <p>{previewCreatorMeta?.display_name || previewCreatorMeta?.username || previewCreatorMeta?.email || '-'}</p>
                       </div>
                     )}
                     <div>

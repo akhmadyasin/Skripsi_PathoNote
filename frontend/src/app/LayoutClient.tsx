@@ -60,7 +60,7 @@ export default function LayoutClient({ children }: { children: ReactNode }) {
       setEmail(profile.email);
       setMeta(profile.meta as UserMeta);
       setRole(profile.role);
-      setProfileName(profile.username);
+      setProfileName(profile?.username || "");
       setProfileEmail(profile.email);
       setIsAuthenticated(true);
       setLoading(false);
