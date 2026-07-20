@@ -828,9 +828,24 @@ def update_collection_status(collection_id):
         "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
     }), 410
 
+# Ambil murni dari file .env tanpa hardcoded fallback
+API_KEY_SECRET = os.getenv("API_KEY_SECRET")
+
+# Pengaman: matikan server saat startup jika .env belum diisi
+if not API_KEY_SECRET:
+  raise RuntimeError("CRITICAL: API_KEY_SECRET belum diset di file .env!")
 
 @app.route('/api/hasil-patologi', methods=['GET'])
 def list_hasil_patologi():
+    # 1. Tambahkan proteksi API Key di paling atas
+    api_key = request.headers.get('X-API-KEY')
+    if not api_key or api_key != API_KEY_SECRET:
+        return jsonify({
+            "success": False,
+            "error": "Unauthorized access: API Key tidak valid atau tidak ditemukan."
+        }), 401
+
+    # 2. Logika bawaan lu (tetap sama)
     limit = request.args.get("limit", "50")
     try:
         limit_value = max(1, min(int(limit), 200))
@@ -849,20 +864,31 @@ def list_hasil_patologi():
         "records": records,
     })
 
-
-@app.route('/api/hasil-patologi/<record_id>', methods=['GET'])
+@app.route("/api/hasil-patologi/<record_id>", methods=["GET"])
 def get_hasil_patologi_detail(record_id):
-    try:
-        record = fetch_hasil_patologi_record(record_id)
-    except Exception as exc:
-        print(f"[hasil_patologi] Failed to fetch record {record_id}: {exc}")
-        return jsonify({"success": False, "error": str(exc)}), 500
+  api_key = request.headers.get("X-API-KEY")
+  if not api_key or api_key != API_KEY_SECRET:
+    return (
+        jsonify({
+            "success": False,
+            "error": (
+                "Unauthorized access: API Key tidak valid atau tidak"
+                " ditemukan."
+            ),
+        }),
+        401,
+    )
 
-    if not record:
-        return jsonify({"success": False, "error": "Record tidak ditemukan."}), 404
+  try:
+    record = fetch_hasil_patologi_record(record_id)
+  except Exception as exc:
+    print(f"[hasil_patologi] Failed to fetch record {record_id}: {exc}")
+    return jsonify({"success": False, "error": str(exc)}), 500
 
-    return jsonify({"success": True, "record": record})
+  if not record:
+    return jsonify({"success": False, "error": "Record tidak ditemukan."}), 404
 
+  return jsonify({"success": True, "record": record})
 
 @app.route('/api/hasil-patologi/<record_id>', methods=['DELETE'])
 def delete_hasil_patologi(record_id):
