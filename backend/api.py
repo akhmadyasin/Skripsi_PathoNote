@@ -550,6 +550,23 @@ def list_admin_users():
         traceback.print_exc()
         return jsonify({"error": "Failed to list users."}), 500
 
+def _build_supabase_admin_user_payload(email: str, password: str, username: str, display_name: str, new_role: str) -> dict:
+    return {
+        "email": email,
+        "password": password,
+        "email_confirm": True,
+        "user_metadata": {
+            "username": username,
+            "display_name": display_name,
+            "summary_mode": "patologi",
+            "role": new_role,
+        },
+        "app_metadata": {
+            "role": new_role,
+        },
+    }
+
+
 @app.route('/api/admin/create-user', methods=['POST'])
 def create_user_admin():
     if not supabase:
@@ -602,17 +619,8 @@ def create_user_admin():
         return jsonify({"error": "role must be either 'dokter' or 'petugas'."}), 400
 
     try:
-        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/signup"
-        body = {
-            "email": email,
-            "password": password,
-            "data": {
-                "username": username,
-                "display_name": display_name,
-                "summary_mode": "patologi",
-                "role": new_role,
-            },
-        }
+        body = _build_supabase_admin_user_payload(email, password, username, display_name, new_role)
+        url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users"
         headers = {
             "apiKey": SUPABASE_SERVICE_KEY,
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -635,8 +643,8 @@ def create_user_admin():
                 "Akun PathoNote Anda telah dibuat oleh Superadmin.\n\n"
                 f"Email: {new_user_email}\n"
                 f"Role: {new_role}\n\n"
-                "Silakan cek kotak masuk atau folder spam untuk email konfirmasi Supabase. "
-                "Jika email konfirmasi belum tiba, Anda dapat menggunakan halaman login dan meminta link reset password jika perlu.\n\n"
+                "Akun Anda sudah aktif dan dapat digunakan langsung."
+                "Jika Anda mengalami kesulitan saat login, silakan gunakan fitur reset password.\n\n"
                 "Terima kasih,\nTim PathoNote"
             )
             try:

@@ -57,7 +57,7 @@ export default function LoginPage() {
             Sign in to your account to continue
           </p>
 
-          {err && <div className="alert">{err}</div>}
+          {err && <div className="alert error">{err}</div>}
 
           <form onSubmit={onSubmit}>
             <label>Email</label>

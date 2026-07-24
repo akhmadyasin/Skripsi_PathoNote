@@ -235,9 +235,10 @@
 }
 
 .alert.error {
-  background: #fee2e2;
-  color: #b91c1c;
-  border-left-color: #dc2626;
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  color: #991b1b;
+  border-left-color: #ef4444;
+  box-shadow: 0 8px 20px rgba(239, 68, 68, 0.18);
 }
 
 .alert.success {

@@ -85,14 +85,15 @@ export default function RegisterPage() {
         }),
       });
 
-      const result = (await response.json()) as { error?: string };
+      const result = (await response.json()) as { error?: string; success?: boolean; user?: { email?: string } };
       if (!response.ok) {
         setErr(result?.error || "Failed to create user.");
         setLoading(false);
         return;
       }
 
-      setInfo("User has been created successfully.");
+      const userEmail = result?.user?.email || email;
+      setInfo(`User created successfully for ${userEmail}.`);
       setUsername("");
       setEmail("");
       setPassword("");

@@ -154,23 +154,40 @@ export default function Dashboard() {
 
         let history: Array<Record<string, unknown>> = [];
         if (userId) {
-          const { data: historyData, error: historyError } = await supabase
+          let queryBuilder = supabase
             .from("history_pengiriman")
-            .select("*")
-            .eq("petugas_id", userId)
+            .select(`
+              id,
+              created_at,
+              nama_petugas,
+              metode_pengiriman,
+              tujuan_pengiriman,
+              status,
+              petugas_id,
+              hasil_patologi_id,
+              hasil_patologi ( nomor_pa, jaringan )
+            `)
             .order("created_at", { ascending: false })
             .limit(8);
+
+          // Apply role-specific filtering
+          if (currentRole === "superadmin") {
+            // SUPERADMIN: Show only create_user and delete_user activities
+            queryBuilder = queryBuilder.in("metode_pengiriman", ["create_user", "delete_user"]);
+          } else if (currentRole === "petugas") {
+            // PETUGAS: Show only email activities
+            queryBuilder = queryBuilder.or("metode_pengiriman.ilike.%email%,tujuan_pengiriman.ilike.%@%");
+          } else if (currentRole === "dokter") {
+            // DOKTER: Show own activities with hasil_patologi
+            queryBuilder = queryBuilder.eq("petugas_id", userId);
+          }
+
+          const { data: historyData, error: historyError } = await queryBuilder;
 
           if (historyError) {
             console.warn("Failed to load dashboard activity from history_pengiriman:", historyError);
           } else {
             history = Array.isArray(historyData) ? historyData : [];
-            if (currentRole !== "superadmin") {
-              history = history.filter((record) => {
-                const method = String(record.metode_pengiriman || record.metode || "").toLowerCase();
-                return method !== "create_user" && method !== "delete_user";
-              });
-            }
           }
         }
 
@@ -219,18 +236,31 @@ export default function Dashboard() {
         const mappedActivities = activityFeed.map((item, index) => {
           const record = item as Record<string, unknown> & { __source?: string };
           const source = record.__source;
-          const method = source === "hasil_patologi"
-            ? "hasil pemeriksaan dibuat"
-            : String(record.metode_pengiriman || record.metode || "Aktivitas").replace(/_/g, " ");
+          const metode = String(record.metode_pengiriman || record.metode || "Aktivitas").toLowerCase();
           const destination = String(record.tujuan_pengiriman || record.tujuan || "").trim();
           const statusValue = String(record.status || "").toLowerCase();
           const createdAt = String(record.created_at || "");
-          const time = createdAt ? new Date(createdAt).toLocaleString("id-ID", {
-            day: "2-digit",
-            month: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          }) : "Baru saja";
+          const namaPetugas = String(record.nama_petugas || "Pengguna").trim();
+
+          let title = "";
+          let description = "";
+
+          // Handle account management activities (create_user, delete_user)
+          if (metode === "create_user") {
+            title = "Aktivitas Akun: Pembuatan Pengguna Baru";
+            description = `Oleh: ${namaPetugas}${destination ? ` (${destination})` : ""}`;
+          } else if (metode === "delete_user") {
+            title = "Aktivitas Akun: Penghapusan Pengguna";
+            description = `Oleh: ${namaPetugas}${destination ? ` (${destination})` : ""}`;
+          } else if (source === "hasil_patologi") {
+            // Regular hasil_patologi activities
+            title = "Hasil Pemeriksaan Dibuat";
+            description = (String(record.nomor_pa || record.kunjungan || "Record hasil pemeriksaan dibuat").trim() || "Record hasil pemeriksaan dibuat");
+          } else {
+            // Other history_pengiriman activities (email, etc)
+            title = metode.charAt(0).toUpperCase() + metode.slice(1).replace(/_/g, " ");
+            description = destination || `Aksi ${metode} tercatat`;
+          }
 
           const statusLabel = ["success", "terkirim", "completed", "done", "sent", "2"].includes(statusValue)
             ? "Terkirim"
@@ -240,13 +270,16 @@ export default function Dashboard() {
                 ? "Diproses"
                 : "Aktif";
 
-          const description = source === "hasil_patologi"
-            ? (String(record.nomor_pa || record.kunjungan || "Record hasil pemeriksaan dibuat").trim() || "Record hasil pemeriksaan dibuat")
-            : (destination || `Aksi ${method} tercatat`);
+          const time = createdAt ? new Date(createdAt).toLocaleString("id-ID", {
+            day: "2-digit",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }) : "Baru saja";
 
           return {
             id: String((item as { id?: string }).id || `${index}`),
-            title: `${method.charAt(0).toUpperCase() + method.slice(1)}${destination ? ` · ${destination}` : ""}`,
+            title,
             description,
             time,
             status: statusLabel,
