@@ -177,13 +177,13 @@ export default function SettingsPage() {
   // handlers
   const save = () => {
     localStorage.setItem("voiceToTextSettings", JSON.stringify(settings));
-    showToast("Pengaturan berhasil disimpan!", "success");
+    showToast("Settings saved successfully!", "success");
   };
   const reset = () => {
-    if (confirm("Reset semua pengaturan ke default?")) {
+    if (confirm("Reset all settings to default?")) {
       localStorage.removeItem("voiceToTextSettings");
       setSettings(DEFAULTS);
-      showToast("Pengaturan telah direset ke default.", "success");
+      showToast("Settings have been reset to default.", "success");
     }
   };
 
@@ -219,13 +219,13 @@ export default function SettingsPage() {
 
     // Validate file type
     if (!file.type.startsWith('image/')) {
-      setSignatureStatus({ type: "error", message: "File harus berupa gambar (PNG, JPG, dll)." });
+      setSignatureStatus({ type: "error", message: "File must be an image (PNG, JPG, etc)." });
       return;
     }
 
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
-      setSignatureStatus({ type: "error", message: "Ukuran file maksimal 5MB." });
+      setSignatureStatus({ type: "error", message: "Maximum file size is 5MB." });
       return;
     }
 
@@ -240,7 +240,7 @@ export default function SettingsPage() {
 
   const uploadSignature = async () => {
     if (!signatureFile) {
-      setSignatureStatus({ type: "error", message: "Pilih file signature terlebih dahulu." });
+      setSignatureStatus({ type: "error", message: "Please select a signature file first." });
       return;
     }
 
@@ -248,7 +248,7 @@ export default function SettingsPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setSignatureStatus({ type: "error", message: "User tidak ditemukan." });
+        setSignatureStatus({ type: "error", message: "User not found." });
         setIsUploadingSignature(false);
         return;
       }

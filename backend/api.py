@@ -351,10 +351,10 @@ def send_email_smtp(to_email: str, subject: str, body: str, is_html: bool = Fals
             server.send_message(msg)
             print(f"[send_email_smtp] Message sent successfully!")
         
-        return True, "Email berhasil dikirim"
+        return True, "Email sent successfully"
     except smtplib.SMTPAuthenticationError as e:
         print(f"[send_email_smtp] Authentication Error: {e}")
-        return False, "Email atau sandi aplikasi Gmail tidak valid"
+        return False, "Gmail email or app password is not valid"
     except smtplib.SMTPException as e:
         print(f"[send_email_smtp] SMTP Error: {e}")
         return False, f"SMTP Error: {str(e)}"
@@ -656,11 +656,11 @@ def create_user_admin():
                 traceback.print_exc()
                 email_message = str(e)
 
-        # Log creation activity: actor=current_user
+        # Log creation activity: actor=current_user, tujuan=new_user_email
         try:
             actor_id = current_user.get('id')
             actor_email = current_user.get('email') or (user_meta.get('email') if user_meta else '')
-            log_pengiriman_history(None, actor_id, actor_email, "create_user", "", "success")
+            log_pengiriman_history(None, actor_id, actor_email, "create_user", new_user_email, "success")
         except Exception as e:
             print(f"[create_user_admin] Failed to log activity: {e}")
 
@@ -737,6 +737,18 @@ def delete_user_admin(user_id):
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             "Content-Type": "application/json",
         }
+        
+        # First, fetch the user email before deleting
+        deleted_user_email = ""
+        try:
+            get_request = Request(url, headers=headers, method='GET')
+            with urlopen(get_request) as get_response:
+                get_data = json.load(get_response)
+                deleted_user_email = get_data.get('email', '')
+        except Exception as e:
+            print(f"[delete_user_admin] Failed to fetch deleted user email: {e}")
+        
+        # Now delete the user
         request_obj = Request(url, headers=headers, method='DELETE')
         with urlopen(request_obj) as response:
             body = response.read().decode('utf-8')
@@ -748,7 +760,7 @@ def delete_user_admin(user_id):
         try:
             actor_id = current_user.get('id')
             actor_email = current_user.get('email') or (user_meta.get('email') if user_meta else '')
-            log_pengiriman_history(None, actor_id, actor_email, "delete_user", "", "success")
+            log_pengiriman_history(None, actor_id, actor_email, "delete_user", deleted_user_email, "success")
         except Exception as e:
             print(f"[delete_user_admin] Failed to log activity: {e}")
 
@@ -850,7 +862,7 @@ def list_hasil_patologi():
     if not api_key or api_key != API_KEY_SECRET:
         return jsonify({
             "success": False,
-            "error": "Unauthorized access: API Key tidak valid atau tidak ditemukan."
+            "error": "Unauthorized access: Invalid or missing API key."
         }), 401
 
     # 2. Logika bawaan lu (tetap sama)
@@ -880,7 +892,7 @@ def get_hasil_patologi_detail(record_id):
         jsonify({
             "success": False,
             "error": (
-                "Unauthorized access: API Key tidak valid atau tidak"
+                "Unauthorized access: Invalid or missing API key."
                 " ditemukan."
             ),
         }),
@@ -1283,7 +1295,7 @@ def api_send_email():
             print(f"[/api/send-email] ERROR: Invalid email format")
             # Log failed attempt even jika ID tidak lengkap
             log_pengiriman_history(hasil_patologi_id, petugas_id, nama_petugas, "email", to_email, "failed")
-            return jsonify({"status": "error", "message": "Format email tidak valid"}), 400
+            return jsonify({"status": "error", "message": "Invalid email format"}), 400
         
         print(f"[/api/send-email] Validation passed, sending email...")
         
@@ -1329,7 +1341,7 @@ def api_test_email():
         if success:
             return jsonify({"status": "success", "message": f"Email test berhasil: {message}"}), 200
         else:
-            return jsonify({"status": "error", "message": f"Email test gagal: {message}"}), 400
+            return jsonify({"status": "error", "message": f"Email test failed: {message}"}), 400
             
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"

@@ -43,6 +43,15 @@ export default function HistoryPage() {
   const [previewRecord, setPreviewRecord] = useState<PathologyRecord | null>(null);
   const [previewCreatorMeta, setPreviewCreatorMeta] = useState<UserMeta | null>(null);
 
+  // Initialize query from URL search param so topbar search navigates here
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('search') || '';
+      if (q) setQuery(q);
+    } catch {}
+  }, []);
+
   // Fetch session dan data history
   useEffect(() => {
     let mounted = true;
@@ -235,7 +244,7 @@ export default function HistoryPage() {
     setPreviewLoading(true);
 
     if (!record.hasil_patologi_id) {
-      setPreviewError("Tidak ada ID hasil patologi terkait.");
+      setPreviewError("No related pathology examination ID.");
       setPreviewLoading(false);
       return;
     }
@@ -349,7 +358,7 @@ export default function HistoryPage() {
           <div className={h.tableContainer}>
             {filteredHistories.length === 0 ? (
               <div className={h.emptyState}>
-                <p>Belum ada history pengiriman</p>
+                <p>No distribution history yet</p>
               </div>
             ) : (
               <table className={h.table}>
@@ -456,18 +465,18 @@ export default function HistoryPage() {
                   <div className={h.previewContent}>
                     {renderReportPreview(previewRecord)}
                     {!previewRecord.diagnosa_klinik && !previewRecord.keterangan_klinik && !previewRecord.makroskopik && !previewRecord.mikroskopik && !previewRecord.kesimpulan && (
-                      <p className={h.noPreviewText}>Tidak ada data hasil patologi yang dapat ditampilkan.</p>
+                      <p className={h.noPreviewText}>No examination data available to display.</p>
                     )}
                   </div>
                 </>
               ) : (
-                <div className={h.noPreviewText}>Tidak ada data preview.</div>
+                <div className={h.noPreviewText}>No preview data.</div>
               )}
             </div>
 
             <div className={h.previewActions}>
               <button className={h.secondaryButton} onClick={closePreviewModal} type="button">
-                Tutup
+                Close
               </button>
               {previewRecord && userRole !== 'dokter' && (
                 <button className={h.primaryButton} onClick={() => {

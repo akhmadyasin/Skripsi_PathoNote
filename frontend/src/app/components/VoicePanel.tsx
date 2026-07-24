@@ -170,26 +170,26 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
 
     if (isStopCommand) {
       if (!canUseVoiceCommand) {
-        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        showToast("Voice command cannot be processed due to limited access.", "error");
         return true;
       }
       if (isTranscriptionPausedRef.current) {
-        showToast("Transkripsi sudah dijeda. Gunakan Continue atau Save.", "info");
+        showToast("Transcription is paused. Use Continue or Save.", "info");
       } else if (isListeningRef.current) {
         handleStopListening();
       } else {
-        showToast("Perekaman sudah berhenti.", "info");
+        showToast("Recording already stopped.", "info");
       }
       return true;
     }
 
     if (isContinueCommand) {
       if (!canUseVoiceCommand) {
-        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        showToast("Voice command cannot be processed due to limited access.", "error");
         return true;
       }
       if (isListeningRef.current && !isTranscriptionPausedRef.current) {
-        showToast("Perekaman sedang berjalan.", "info");
+        showToast("Recording is running.", "info");
       } else {
         void handleSecondaryAction();
       }
@@ -198,13 +198,13 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
 
     if (isSaveCommand) {
       if (!canUseVoiceCommand) {
-        showToast("Perintah suara tidak bisa diproses karena akses terbatas.", "error");
+        showToast("Voice command cannot be processed due to limited access.", "error");
         return true;
       }
       const el = summaryEditorRef.current;
       const summaryText = (el?.textContent || "").trim();
       if (!summaryText) {
-        showToast("Ringkasan kosong — tidak ada yang disimpan.", "error");
+        showToast("Summary is empty — nothing to save.", "error");
         return true;
       }
       const saveButton = document.getElementById("saveBtn") as HTMLButtonElement | null;
@@ -255,9 +255,9 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     const socket = io(BACKEND_ORIGIN, { transports: ["websocket"] });
     socketRef.current = socket;
 
-    socket.on("connect", () => setConnectionStatus("🟢 Terhubung"));
-    socket.on("disconnect", () => setConnectionStatus("🔴 Terputus"));
-    socket.on("connect_error", () => setConnectionStatus("🟡 Gagal"));
+    socket.on("connect", () => setConnectionStatus("🟢 Connected"));
+    socket.on("disconnect", () => setConnectionStatus("🔴 Disconnected"));
+    socket.on("connect_error", () => setConnectionStatus("🟡 Failed"));
 
     socket.on("summary_stream", (data: any) => {
       const editor = summaryEditorRef.current;
@@ -353,13 +353,13 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
 
         const friendlyMessage =
           errorCode === "network"
-            ? "Gagal memulai pengenalan suara: periksa koneksi jaringan Anda."
+            ? "Failed to start speech recognition: check your network connection."
             : `SpeechRecognition error: ${errorCode}`;
         showToast(friendlyMessage, "error");
       };
       recognitionRef.current = recognition;
     } else {
-      alert("Browser Anda tidak mendukung Web Speech API. Coba gunakan Google Chrome.");
+      alert("Your browser does not support Web Speech API. Try using Google Chrome.");
     }
     
     return () => {
@@ -391,7 +391,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     }
 
     if (roleRef.current !== "dokter") {
-      showToast("Akses Voice Panel hanya tersedia untuk Dokter.", "error");
+      showToast("Voice Panel access is only available for Doctors.", "error");
       return;
     }
 
@@ -450,7 +450,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
         requestSummarize(textToSummarize, true);
       }
 
-      showToast("Transkripsi UI dijeda. Mikrofon tetap aktif sampai Save.", "info");
+      showToast("Transcription UI is paused. Microphone remains active until Save.", "info");
     }
   };
 
@@ -474,7 +474,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
         recognitionRef.current.start();
       } catch (err) {
         console.error("Failed to restart recognition:", err);
-        showToast("Gagal memulai ulang. Coba lagi.", "error");
+        showToast("Failed to restart. Try again.", "error");
       }
     }
   };
@@ -491,7 +491,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
 
     const data = await response.json();
     if (!response.ok || data.status !== "success") {
-      throw new Error(data.message || "Gagal menyimpan ke hasil_patologi");
+      throw new Error(data.message || "Failed to save examination results");
     }
     return data;
   };
@@ -513,7 +513,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     summarizeInFlightRef.current = true;
     
     if (showUI && summaryEditorRef.current) {
-        summaryEditorRef.current.innerHTML = "<i>Memproses ringkasan...</i>";
+        summaryEditorRef.current.innerHTML = "<i>Processing summary...</i>";
     }
     
     socketRef.current.emit("summarize_stream", { text });
@@ -525,17 +525,17 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const hasExistingTranscript = (fullTranscriptRef.current || "").trim().length > 0 || (transcript || "").trim().length > 0;
   const secondaryButtonLabel = isTranscriptionPaused ? "Continue" : isListening ? "Stop" : "Continue";
   const secondaryButtonTitle = isTranscriptionPaused
-    ? "Lanjutkan transkripsi di UI"
+    ? "Continue transcription in UI"
     : isListening
-      ? "Hentikan transkripsi di UI, mikrofon tetap aktif"
-      : "Lanjutkan transkripsi di UI";
+      ? "Stop transcription in UI, microphone remains active"
+      : "Continue transcription in UI";
 
   return (
     <>
       <div className="vtt-flex-container">
         { role === "petugas" && (
           <div style={{ marginBottom: 14, padding: '14px 18px', background: '#fff1f2', color: '#991b1b', borderRadius: 14, border: '1px solid #fecdd3' }}>
-            Akses Voice Panel dibatasi. Role <strong>Petugas</strong> tidak dapat memulai listening.
+            Voice Panel access is limited. Officer role cannot start listening.
           </div>
         ) }
         {/* Kolom Kiri */}
@@ -550,7 +550,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
             <div
               id="transcript"
               role="region"
-              aria-label="Transkrip"
+              aria-label="Transcript"
               style={{
                 width: '100%',
                 border: 'none',
@@ -590,7 +590,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
                 boxShadow: 'none',
                 outline: 'none',
               }}
-              title={role === "loading" ? "Memuat role..." : allowed ? "Mulai perekaman" : "Voice Panel hanya untuk Dokter"}
+              title={role === "loading" ? "Loading role..." : allowed ? "Start recording" : "Voice Panel is for Doctors only"}
               onMouseOver={e => {
                 if (!allowed || isListening) return;
                 e.currentTarget.style.background = '#e6eaf3';
@@ -606,7 +606,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
                 <circle cx="10" cy="10" r="10" fill="#b2f5ea"/>
                 <polygon points="8,6 15,10 8,14" fill="#319795"/>
               </svg>
-              {role === "loading" ? 'Memuat...' : allowed ? (hasStartedSession ? 'Restart' : 'Start') : 'Akses terbatas'}
+              {role === "loading" ? 'Loading...' : allowed ? (hasStartedSession ? 'Restart' : 'Start') : 'Limited access'}
             </button>
 
             <button
@@ -670,7 +670,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
             id="summaryEditor"
             className="editor"
             contentEditable
-            data-placeholder="Ringkasan akan muncul di sini..."
+            data-placeholder="Summary will appear here..."
             style={{ minHeight: 120, flexGrow: 1, marginBottom: 0, overflow: 'auto', maxHeight: '60vh', padding: 8 }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>

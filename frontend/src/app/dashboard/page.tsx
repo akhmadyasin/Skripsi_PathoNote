@@ -247,15 +247,15 @@ export default function Dashboard() {
 
           // Handle account management activities (create_user, delete_user)
           if (metode === "create_user") {
-            title = "Aktivitas Akun: Pembuatan Pengguna Baru";
-            description = `Oleh: ${namaPetugas}${destination ? ` (${destination})` : ""}`;
+            title = "Created User";
+            description = destination || "New user created";
           } else if (metode === "delete_user") {
-            title = "Aktivitas Akun: Penghapusan Pengguna";
-            description = `Oleh: ${namaPetugas}${destination ? ` (${destination})` : ""}`;
+            title = "Deleted User";
+            description = destination || "User deleted";
           } else if (source === "hasil_patologi") {
             // Regular hasil_patologi activities
-            title = "Hasil Pemeriksaan Dibuat";
-            description = (String(record.nomor_pa || record.kunjungan || "Record hasil pemeriksaan dibuat").trim() || "Record hasil pemeriksaan dibuat");
+            title = "Record Created";
+            description = (String(record.nomor_pa || record.kunjungan || "Examination record created").trim() || "Examination record created");
           } else {
             // Other history_pengiriman activities (email, etc)
             title = metode.charAt(0).toUpperCase() + metode.slice(1).replace(/_/g, " ");
@@ -263,12 +263,12 @@ export default function Dashboard() {
           }
 
           const statusLabel = ["success", "terkirim", "completed", "done", "sent", "2"].includes(statusValue)
-            ? "Terkirim"
+            ? "Sent"
             : statusValue === "failed" || statusValue === "gagal"
-              ? "Gagal"
+              ? "Failed"
               : statusValue === "pending" || statusValue === "draft" || statusValue === "received" || statusValue === "1"
-                ? "Diproses"
-                : "Aktif";
+                ? "Processing"
+                : "Active";
 
           const time = createdAt ? new Date(createdAt).toLocaleString("id-ID", {
             day: "2-digit",
@@ -306,41 +306,41 @@ export default function Dashboard() {
     };
   }, [router, supabase]);
 
-  const roleLabel = role === "petugas" ? "Petugas" : role === "superadmin" ? "Superadmin" : "Dokter";
+  const roleLabel = role === "petugas" ? "Officer" : role === "superadmin" ? "Superadmin" : "Doctor";
   const summaryCards = [
     {
-      title: role === "petugas" ? "Data Tersedia" : role === "superadmin" ? "Total Rekam Sistem" : "Total Rekam Saya",
+      title: role === "petugas" ? "Available Data" : role === "superadmin" ? "Total System Records" : "My Total Records",
       value: statsLoading ? "..." : stats.totalRecords,
       subtext: role === "petugas"
-        ? "Rekam yang bisa Anda distribusikan"
+        ? "Records available for distribution"
         : role === "superadmin"
-          ? "Semua rekam hasil pemeriksaan yang terkelola"
-          : "Rekam hasil pemeriksaan Anda",
+          ? "All managed examination records"
+          : "Your examination records",
     },
     {
-      title: role === "petugas" ? "Menunggu Distribusi" : role === "superadmin" ? "Butuh Tindakan" : "Masih Diproses",
+      title: role === "petugas" ? "Pending Distribution" : role === "superadmin" ? "Needs Action" : "Processing",
       value: statsLoading ? "..." : stats.pendingTasks,
       subtext: role === "petugas"
-        ? "Masih menunggu penyaluran ke tujuan"
+        ? "Still waiting for distribution"
         : role === "superadmin"
-          ? "Rekam yang masih belum selesai ditangani"
-          : "Masih menunggu proses akhir",
+          ? "Records not yet completed"
+          : "Waiting for final processing",
     },
     {
-      title: "Sudah Didistribusikan",
+      title: "Already Distributed",
       value: statsLoading ? "..." : stats.distributedCount,
       subtext: role === "petugas"
-        ? "Distribusi via email yang sudah selesai"
+        ? "Email distribution already completed"
         : role === "superadmin"
-          ? "Semua distribusi email yang sudah terdata"
-          : "Distribusi email Anda yang sudah selesai",
+          ? "All recorded email distributions"
+          : "Your completed email distributions",
     },
   ];
 
   if (loading) {
     return (
       <div className={s.dashboardContainer}>
-        <div className={s.card}>Memuat dashboard…</div>
+        <div className={s.card}>Loading dashboard…</div>
       </div>
     );
   }
@@ -351,7 +351,7 @@ export default function Dashboard() {
       <div className={s.dashboardContainer} style={{ display: listening ? 'none' : 'block' }}>
         {role === "petugas" && (
           <div style={{ marginBottom: 18, padding: 16, background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 14, color: '#92400e' }}>
-            Akses Voice Panel dibatasi untuk role <strong>Petugas</strong>. Untuk membuka Voice Panel, gunakan akun dengan role <strong>Dokter</strong>.
+            Voice Panel access is limited to <strong>Officer</strong> role. To open Voice Panel, use an account with <strong>Doctor</strong> role.
           </div>
         )}
         {role === "superadmin" && (

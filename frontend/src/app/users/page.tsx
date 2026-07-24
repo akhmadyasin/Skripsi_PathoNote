@@ -33,6 +33,15 @@ export default function UserListPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
+  // Initialize query from URL search param so topbar search navigates here
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('search') || '';
+      if (q) setQuery(q);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -77,25 +86,25 @@ export default function UserListPage() {
 
       const result = await response.json() as { users?: UserRow[]; error?: string };
       if (!response.ok) {
-        throw new Error(result?.error || "Gagal memuat daftar pengguna.");
+        throw new Error(result?.error || "Failed to load user list.");
       }
 
       setUsers(Array.isArray(result?.users) ? result.users : []);
       setError(null);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Terjadi kesalahan saat memuat data pengguna.");
+      setError(err instanceof Error ? err.message : "An error occurred while loading user data.");
       setUsers([]);
     }
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus akun ini?")) return;
+    if (!confirm("Are you sure you want to delete this account?")) return;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken = session?.access_token;
       if (!accessToken) {
-        throw new Error("Token akses tidak tersedia.");
+        throw new Error("Access token not available.");
       }
 
       const response = await fetch(`${API_BASE}/api/admin/delete-user/${encodeURIComponent(userId)}`, {
@@ -107,12 +116,12 @@ export default function UserListPage() {
 
       const result = await response.json() as { success?: boolean; error?: string };
       if (!response.ok || !result.success) {
-        throw new Error(result?.error || "Gagal menghapus akun.");
+        throw new Error(result?.error || "Failed to delete account.");
       }
 
       await loadUsers(accessToken);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Terjadi kesalahan saat menghapus akun.");
+      setError(err instanceof Error ? err.message : "An error occurred while deleting the account.");
     }
   };
 
@@ -166,7 +175,7 @@ export default function UserListPage() {
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <a href="/dashboard" style={styles.secondaryButton}>← Dashboard</a>
-          <a href="/register" style={styles.primaryButton}>+ Tambah User</a>
+          <a href="/register" style={styles.primaryButton}>+ Add User</a>
         </div>
       </div>
 
@@ -174,17 +183,17 @@ export default function UserListPage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cari nama, email, atau role…"
+          placeholder="Search by name, email, or role…"
           style={styles.input}
         />
-        <div style={styles.summary}>{filteredUsers.length} pengguna</div>
+        <div style={styles.summary}>{filteredUsers.length} users</div>
       </div>
 
       {error ? (
         <div style={styles.errorBox}>{error}</div>
       ) : filteredUsers.length === 0 ? (
         <div style={styles.card}>
-          <p style={{ margin: 0, color: "#64748b" }}>Belum ada pengguna yang tersedia.</p>
+          <p style={{ margin: 0, color: "#64748b" }}>No users available.</p>
         </div>
       ) : (
         <div style={styles.tableWrap}>
