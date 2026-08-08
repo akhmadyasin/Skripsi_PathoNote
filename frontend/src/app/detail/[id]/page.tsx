@@ -70,6 +70,9 @@ const NON_EDITABLE_FIELDS = new Set([
   'user_id',
   'created_at',
   'updated_at',
+  'status',
+  'status_data',
+  'status_pengiriman',
 ]);
 
 function isEditableField(key: string) {
@@ -342,7 +345,8 @@ export default function DetailPage() {
   const [editValues, setEditValues] = useState<Partial<PathologyRecord>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
+  const [isAutoFillLoading, setIsAutoFillLoading] = useState(false);
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://127.0.0.1:5001';
 
   // share email modal
   const [showShareEmailModal, setShowShareEmailModal] = useState(false);
@@ -527,6 +531,56 @@ export default function DetailPage() {
       setIsSaving(false);
     }
   };
+
+  const handleAutoFillPasien = async (noRm: string) => {
+    const normalizedNoRm = String(noRm || '').trim();
+    if (!normalizedNoRm) return;
+
+    setIsAutoFillLoading(true);
+    setSaveStatus(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/pasien/${encodeURIComponent(normalizedNoRm)}`);
+      const result = await response.json();
+
+      if (response.ok && result.success && result.data) {
+        const p = result.data;
+        const autoFillValues: Partial<PathologyRecord> = {
+          kunjungan: p.no_rm,
+          cairan_fiksasi: p.cairan_fiksasi || (editValues.cairan_fiksasi ?? detailData?.cairan_fiksasi),
+          keterangan_klinik: `Dokter Perujuk: ${p.dokter_perujuk || '-'}${p.unit_pengantar ? ` | Unit: ${p.unit_pengantar}` : ''}${p.umur ? ` | Umur: ${p.umur}` : ''}`,
+        };
+
+        if ('nama_pasien' in (detailData || {}) || 'nama_pasien' in editValues) {
+          (autoFillValues as any).nama_pasien = p.nama_pasien || '';
+        }
+
+        setEditValues((prev) => ({ ...prev, ...autoFillValues }));
+        setSaveStatus({ type: 'success', message: `Data pasien ${p.nama_pasien || normalizedNoRm} berhasil dimuat otomatis.` });
+      } else {
+        setSaveStatus({ type: 'error', message: result?.message || 'Data pasien tidak ditemukan di SIMRS.' });
+      }
+    } catch (error) {
+      console.error('Gagal auto-fill pasien:', error);
+      setSaveStatus({ type: 'error', message: 'Gagal memuat data pasien otomatis.' });
+    } finally {
+      setIsAutoFillLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleVoicePanelKunjungan = (event: Event) => {
+      const customEvent = event as CustomEvent<{ no_rm: string }>;
+      const voiceNoRm = String(customEvent.detail?.no_rm || "").trim();
+      if (!voiceNoRm) return;
+      handleAutoFillPasien(voiceNoRm);
+    };
+
+    window.addEventListener("voicepanel-kunjungan-click", handleVoicePanelKunjungan as EventListener);
+    return () => {
+      window.removeEventListener("voicepanel-kunjungan-click", handleVoicePanelKunjungan as EventListener);
+    };
+  }, [detailData, editValues]);
 
   const handleDelete = () => {
     if (!confirm("Are you sure you want to delete this transcription?")) return;
@@ -1182,12 +1236,25 @@ export default function DetailPage() {
                         rows={3}
                       />
                     ) : (
-                      <input
-                        className={d.editInput}
-                        type="text"
-                        value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
-                        onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
-                      />
+                      <>
+                        <input
+                          className={d.editInput}
+                          type="text"
+                          value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                          onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                        />
+                        {fieldKey === 'kunjungan' && (
+                          <button
+                            className={d.actionButton}
+                            type="button"
+                            disabled={isAutoFillLoading}
+                            style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center' }}
+                            onClick={() => handleAutoFillPasien(String(editValues.kunjungan ?? detailData.kunjungan ?? ''))}
+                          >
+                            {isAutoFillLoading ? 'Memuat...' : 'Auto-Fill Pasien'}
+                          </button>
+                        )}
+                      </>
                     )
                   ) : (
                     <div className={h.reportFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>

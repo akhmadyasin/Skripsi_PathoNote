@@ -14,6 +14,7 @@ type UserRow = {
   created_at?: string;
   last_sign_in_at?: string;
   email_confirmed_at?: string | null;
+  is_active?: boolean;
 };
 
 type UserMeta = {
@@ -97,8 +98,13 @@ export default function UserListPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Are you sure you want to delete this account?")) return;
+  const handleToggleUserStatus = async (user: UserRow) => {
+    const nextStatus = !user.is_active;
+    const confirmMessage = nextStatus
+      ? `Aktifkan akun ${user.display_name || user.email}?`
+      : `Nonaktifkan akun ${user.display_name || user.email}?`;
+
+    if (!confirm(confirmMessage)) return;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -107,21 +113,23 @@ export default function UserListPage() {
         throw new Error("Access token not available.");
       }
 
-      const response = await fetch(`${API_BASE}/api/admin/delete-user/${encodeURIComponent(userId)}`, {
-        method: "DELETE",
+      const response = await fetch(`${API_BASE}/api/admin/toggle-user-status/${encodeURIComponent(user.id)}`, {
+        method: "PATCH",
         headers: {
           Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({ is_active: nextStatus }),
       });
 
       const result = await response.json() as { success?: boolean; error?: string };
       if (!response.ok || !result.success) {
-        throw new Error(result?.error || "Failed to delete account.");
+        throw new Error(result?.error || "Failed to update account status.");
       }
 
       await loadUsers(accessToken);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An error occurred while deleting the account.");
+      setError(err instanceof Error ? err.message : "An error occurred while updating account status.");
     }
   };
 
@@ -157,7 +165,6 @@ export default function UserListPage() {
           <p style={{ marginTop: 8, color: "#64748b" }}>
             Halaman ini hanya dapat diakses oleh akun Superadmin.
           </p>
-          <a href="/dashboard" style={styles.primaryButton}>Kembali ke Dashboard</a>
         </div>
       </div>
     );
@@ -174,7 +181,6 @@ export default function UserListPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <a href="/dashboard" style={styles.secondaryButton}>← Dashboard</a>
           <a href="/register" style={styles.primaryButton}>+ Add User</a>
         </div>
       </div>
@@ -220,20 +226,20 @@ export default function UserListPage() {
                     <span style={roleBadgeStyle(user.role)}>{formatRole(user.role)}</span>
                   </td>
                   <td style={styles.td}>
-                    <span style={statusBadgeStyle(Boolean(user.email_confirmed_at))}>
-                      {user.email_confirmed_at ? "Terkonfirmasi" : "Menunggu Konfirmasi"}
+                    <span style={statusBadgeStyle(Boolean(user.is_active), Boolean(user.email_confirmed_at))}>
+                      {user.is_active ? (user.email_confirmed_at ? "Aktif" : "Aktif") : "Nonaktif"}
                     </span>
                   </td>
                   <td style={styles.td}>{formatDate(user.created_at)}</td>
                   <td style={styles.td}>
                     <button
                       type="button"
-                      onClick={() => handleDeleteUser(user.id)}
-                      style={styles.deleteButton}
+                      onClick={() => handleToggleUserStatus(user)}
+                      style={user.is_active ? styles.deactivateButton : styles.activateButton}
                       disabled={user.role === "superadmin"}
-                      title={user.role === "superadmin" ? "Tidak dapat menghapus Superadmin" : "Hapus akun"}
+                      title={user.role === "superadmin" ? "Tidak dapat mengubah status Superadmin" : user.is_active ? "Nonaktifkan akun" : "Aktifkan akun"}
                     >
-                      Hapus
+                      {user.is_active ? "Nonaktifkan" : "Aktifkan"}
                     </button>
                   </td>
                 </tr>
@@ -285,15 +291,15 @@ function roleBadgeStyle(role: string) {
   return { ...base, background: "#e0f2fe", color: "#0369a1" };
 }
 
-function statusBadgeStyle(confirmed: boolean) {
+function statusBadgeStyle(active: boolean, confirmed: boolean) {
   return {
     display: "inline-block",
     padding: "6px 10px",
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 700,
-    background: confirmed ? "#dcfce7" : "#fef2f2",
-    color: confirmed ? "#166534" : "#b91c1c",
+    background: active ? (confirmed ? "#dcfce7" : "#dbeafe") : "#fef2f2",
+    color: active ? (confirmed ? "#166534" : "#1d4ed8") : "#b91c1c",
   } as React.CSSProperties;
 }
 
@@ -304,8 +310,17 @@ const styles = {
     padding: 24,
     color: "#0f172a",
   } as React.CSSProperties,
-  deleteButton: {
-    background: "#f87171",
+  deactivateButton: {
+    background: "#f97316",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    padding: "8px 12px",
+    cursor: "pointer",
+    fontWeight: 700,
+  } as React.CSSProperties,
+  activateButton: {
+    background: "#22c55e",
     color: "white",
     border: "none",
     borderRadius: 8,

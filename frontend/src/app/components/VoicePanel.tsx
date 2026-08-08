@@ -89,6 +89,11 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
 
   const [role, setRole] = useState<"dokter" | "petugas" | "loading">("loading");
   const [allowed, setAllowed] = useState(false);
+  const [selectedKunjungan, setSelectedKunjungan] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResult, setSearchResult] = useState<{ no_rm: string; nama_pasien?: string } | null>(null);
   
   // MODIFIKASI: Tingkatkan interval ke 3000ms (3 detik)
   const MIN_SUMMARY_INTERVAL = 3000; 
@@ -102,16 +107,84 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const [hasStartedSession, setHasStartedSession] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("Menyambungkan...");
   const [toast, setToast] = useState<{ msg: string; type: ToastType } | null>(null);
+  const [isRecognitionReady, setIsRecognitionReady] = useState(false);
   const isListeningRef = useRef(false);
   const isTranscriptionPausedRef = useRef(false);
   const allowedRef = useRef(false);
   const roleRef = useRef<"dokter" | "petugas" | "loading">("loading");
+  const hasStartedSessionRef = useRef(false);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const [micPrepared, setMicPrepared] = useState(false);
+  const [micPreparing, setMicPreparing] = useState(false);
+  const [micPreparationError, setMicPreparationError] = useState<string | null>(null);
   const lastVoiceCommandRef = useRef("");
   const lastVoiceCommandAtRef = useRef(0);
   
   const showToast = (msg: string, type: ToastType = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const normalizeNoRm = (value: string) => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return "";
+    return trimmed.match(/^\d+$/) && trimmed.length === 1
+      ? trimmed.padStart(2, "0")
+      : trimmed;
+  };
+
+  const fetchPasienByNoRm = async (value: string) => {
+    const normalized = normalizeNoRm(value);
+    if (!normalized) {
+      throw new Error("Masukkan nomor RM pasien yang valid.");
+    }
+
+    const response = await fetch(`${BACKEND_ORIGIN}/api/pasien/${encodeURIComponent(normalized)}`);
+    const payload = await response.json().catch(() => ({ message: "Data pasien tidak ditemukan." }));
+
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message || "Data pasien tidak ditemukan.");
+    }
+
+    return {
+      no_rm: String(payload.data.no_rm || "").trim(),
+      nama_pasien: payload.data.nama_pasien ? String(payload.data.nama_pasien).trim() : undefined,
+    };
+  };
+
+  const handleSearchPatien = async () => {
+    setSearchError(null);
+    setSearchResult(null);
+    const normalized = normalizeNoRm(searchQuery);
+
+    if (!normalized) {
+      setSearchError("Masukkan nomor RM pasien yang valid.");
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const pasien = await fetchPasienByNoRm(normalized);
+      setSearchResult(pasien);
+      handleKunjunganSelection(normalized);
+    } catch (err: any) {
+      setSearchError(err?.message || "Gagal mencari pasien.");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleKunjunganSelection = (rawNoRm: string) => {
+    const normalized = normalizeNoRm(rawNoRm);
+    if (!normalized) return;
+
+    setSelectedKunjungan(normalized);
+    window.dispatchEvent(
+      new CustomEvent("voicepanel-kunjungan-click", {
+        detail: { no_rm: normalized },
+      })
+    );
+    showToast(`Kunjungan ${normalized} dipilih.`, "success");
   };
 
   useEffect(() => {
@@ -140,6 +213,10 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   }, [isTranscriptionPaused]);
 
   useEffect(() => {
+    hasStartedSessionRef.current = hasStartedSession;
+  }, [hasStartedSession]);
+
+  useEffect(() => {
     roleRef.current = role;
   }, [role]);
 
@@ -165,6 +242,8 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     const isStopCommand = /(^|\b)(klik|tekan)?\s*(stop|berhenti|hentikan)\b/.test(cleaned);
     const isContinueCommand = /(^|\b)(klik|tekan)?\s*(continue|lanjut|lanjutkan)\b/.test(cleaned);
     const isSaveCommand = /(^|\b)(klik|tekan)?\s*(save|simpan)\b/.test(cleaned);
+    const isRestartCommand = /(^|\b)klik\s*(restart|ulang|mulai ulang|mulaiulang)\b/.test(cleaned);
+    const isStartCommand = /(^|\b)(klik|tekan)?\s*(start|mulai)\b/.test(cleaned);
 
     const canUseVoiceCommand = roleRef.current !== "petugas";
 
@@ -188,11 +267,56 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
         showToast("Voice command cannot be processed due to limited access.", "error");
         return true;
       }
+      // Allow voice 'continue' if session was started before OR if there is already transcript content
+      const transcriptExistsForCmd = ((fullTranscriptRef.current || "") + "").trim().length > 0;
+      if (!hasStartedSessionRef.current && !transcriptExistsForCmd) {
+        showToast("Gunakan 'klik start' terlebih dahulu untuk memulai.", "info");
+        return true;
+      }
       if (isListeningRef.current && !isTranscriptionPausedRef.current) {
         showToast("Recording is running.", "info");
       } else {
-        void handleSecondaryAction();
+        // Directly control listening state to avoid stale closures
+        if (isTranscriptionPausedRef.current) {
+          void handleStartListening(false);
+        } else if (isListeningRef.current) {
+          handleStopListening();
+        } else {
+          void handleStartListening(false);
+        }
       }
+      return true;
+    }
+
+    // Handle restart voice command first (requires explicit 'klik')
+    if (isRestartCommand) {
+      if (!canUseVoiceCommand) {
+        showToast("Voice command cannot be processed due to limited access.", "error");
+        return true;
+      }
+      // Restart session via voice: clear transcript and restart recognition
+      setHasStartedSession(true);
+      try {
+        handleRestartListening();
+        showToast("Sesi di-restart dan transkripsi dimulai ulang.", "info");
+      } catch (err) {
+        console.error("Voice restart failed:", err);
+        showToast("Gagal melakukan restart.", "error");
+      }
+      return true;
+    }
+
+    if (isStartCommand) {
+      if (!canUseVoiceCommand) {
+        showToast("Voice command cannot be processed due to limited access.", "error");
+        return true;
+      }
+      if (hasStartedSessionRef.current) {
+        showToast("Sesi sudah dimulai, gunakan 'lanjut' untuk melanjutkan.", "info");
+        return true;
+      }
+      setHasStartedSession(true);
+      void handleStartListening(false);
       return true;
     }
 
@@ -209,6 +333,22 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       }
       const saveButton = document.getElementById("saveBtn") as HTMLButtonElement | null;
       saveButton?.click();
+      return true;
+    }
+
+    const pasienMatch = cleaned.match(/(^|\b)(klik|tekan)?\s*pasien\s*(?:nomor\s*)?(\d{1,4})\b/);
+    if (pasienMatch) {
+      if (!canUseVoiceCommand) {
+        showToast("Voice command cannot be processed due to limited access.", "error");
+        return true;
+      }
+      const rawNoRm = pasienMatch[3] || "";
+      const normalizedNoRm = normalizeNoRm(rawNoRm);
+      if (!normalizedNoRm) {
+        showToast("Nomor RM tidak valid.", "error");
+        return true;
+      }
+      handleKunjunganSelection(normalizedNoRm);
       return true;
     }
 
@@ -241,6 +381,39 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   useEffect(() => {
     void refreshUserRole();
   }, []);
+
+  const prepareMicrophone = async () => {
+    if (micPrepared || micPreparing) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showToast("Browser tidak mendukung akses mikrofon.", "error");
+      return;
+    }
+
+    setMicPreparing(true);
+    setMicPreparationError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      setMicPrepared(true);
+      showToast("Mikrofon langsung aktif. Ucapkan 'klik start' untuk memulai transkripsi.", "info");
+      if (recognitionRef.current) {
+        recognitionRef.current.isManuallyStopped = true;
+        setIsTranscriptionPaused(true);
+        setIsListening(false);
+      }
+    } catch (error: any) {
+      const message = String(error?.message || error || "Gagal membuka mikrofon.");
+      setMicPreparationError(message);
+      showToast(`Gagal membuka mikrofon: ${message}`, "error");
+    } finally {
+      setMicPreparing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || !allowed) return;
+    void prepareMicrophone();
+  }, [allowed, isOpen]);
 
   const scheduleAutoSummarize = (_text: string) => {
     // Ringkasan tidak lagi dipicu secara realtime saat transkrip berubah.
@@ -298,8 +471,8 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
           const normalizedChunk = replaceSpokenPunctuation(chunk);
           
           if (event.results[i].isFinal) {
-            handleVoiceCommand(normalizedChunk);
-            if (!isTranscriptionPausedRef.current) {
+            const isCommand = handleVoiceCommand(normalizedChunk);
+            if (!isCommand && !isTranscriptionPausedRef.current) {
               newFinalText += normalizedChunk + " ";
             }
           } else if (!isTranscriptionPausedRef.current) {
@@ -373,6 +546,20 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!micPrepared || !recognitionRef.current) return;
+    if (isListeningRef.current) return;
+
+    setIsTranscriptionPaused(true);
+    recognitionRef.current.isManuallyStopped = false;
+    try {
+      recognitionRef.current.start();
+      setIsRecognitionReady(true);
+    } catch (err: any) {
+      console.error("Failed to start recognition after mic prepare:", err);
+    }
+  }, [micPrepared]);
+
   const clearSessionState = () => {
     fullTranscriptRef.current = "";
     lastFinalSummaryRef.current = "";
@@ -427,6 +614,10 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   // - Start or restart SpeechRecognition session and manage transcript state.
 
   const handleSecondaryAction = async () => {
+    if (!hasStartedSession) {
+      showToast("Gunakan tombol Start terlebih dahulu untuk memulai transkripsi.", "info");
+      return;
+    }
     if (isTranscriptionPausedRef.current) {
       await handleStartListening(false);
     } else if (isListeningRef.current) {
@@ -443,7 +634,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     if (recognitionRef.current) {
       recognitionRef.current.isManuallyStopped = true;
       setIsTranscriptionPaused(true);
-      setIsListening(true);
+      setIsListening(false);
 
       const textToSummarize = (fullTranscriptRef.current || "").trim();
       if (textToSummarize) {
@@ -458,6 +649,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   // - Pause UI transcription, trigger summary request for accumulated transcript.
 
   const handleRestartListening = () => {
+    // Clear UI and stored transcript
     fullTranscriptRef.current = "";
     lastFinalSummaryRef.current = "";
     lastTranscriptLengthRef.current = 0;
@@ -469,12 +661,36 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
     } catch {}
 
     if (recognitionRef.current) {
-      recognitionRef.current.isManuallyStopped = false;
+      // Ensure recognition is stopped before starting again to avoid InvalidStateError
       try {
-        recognitionRef.current.start();
+        recognitionRef.current.isManuallyStopped = true;
+        try { recognitionRef.current.stop(); } catch {}
       } catch (err) {
-        console.error("Failed to restart recognition:", err);
-        showToast("Failed to restart. Try again.", "error");
+        // ignore
+      }
+
+      // Start again after a short delay and ensure UI flags reflect active recording
+      setTimeout(() => {
+        try {
+          recognitionRef.current.isManuallyStopped = false;
+          // ensure UI shows active listening and not paused
+          setIsTranscriptionPaused(false);
+          isTranscriptionPausedRef.current = false;
+          recognitionRef.current.start();
+          setIsListening(true);
+        } catch (err) {
+          console.error("Failed to restart recognition:", err);
+          showToast("Failed to restart. Try again.", "error");
+        }
+      }, 450);
+    } else {
+      // Fallback: if recognition not yet created, use existing start helper
+      setIsTranscriptionPaused(false);
+      isTranscriptionPausedRef.current = false;
+      try {
+        void handleStartListening(true);
+      } catch (err) {
+        console.error("Fallback restart failed:", err);
       }
     }
   };
@@ -482,11 +698,19 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   // Test hook: handleRestartListening()
   // - Clear session state and attempt to restart recognition.
 
-  const saveToPathology = async (userId: string, text: string) => {
+  const saveToPathology = async (userId: string, text: string, kunjungan: string | null = null) => {
+    const payload: Record<string, any> = {
+      text,
+      user_id: userId,
+    };
+    if (kunjungan) {
+      payload.kunjungan = kunjungan;
+    }
+
     const response = await fetch(`${BACKEND_ORIGIN}/process-report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, user_id: userId }),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
@@ -523,12 +747,17 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   // - Emit socket event to backend for streaming summarization.
 
   const hasExistingTranscript = (fullTranscriptRef.current || "").trim().length > 0 || (transcript || "").trim().length > 0;
-  const secondaryButtonLabel = isTranscriptionPaused ? "Continue" : isListening ? "Stop" : "Continue";
-  const secondaryButtonTitle = isTranscriptionPaused
-    ? "Continue transcription in UI"
-    : isListening
-      ? "Stop transcription in UI, microphone remains active"
-      : "Continue transcription in UI";
+  const transcriptExists = (transcript || "").trim().length > 0;
+  const secondaryButtonLabel = !hasStartedSession && !transcriptExists
+    ? "Klik Start dulu"
+    : isTranscriptionPaused
+      ? "Continue"
+      : "Stop";
+  const secondaryButtonTitle = !hasStartedSession && !transcriptExists
+    ? "Gunakan tombol Start terlebih dahulu untuk memulai transkripsi"
+    : isTranscriptionPaused
+      ? "Continue transcription in UI"
+      : "Stop transcription in UI, microphone remains active";
 
   return (
     <>
@@ -570,49 +799,78 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
             <button
               id="startBtn"
               onClick={() => {
-                setHasStartedSession(true);
-                handleStartListening(hasStartedSession);
+                if (hasStartedSessionRef.current) {
+                  // Restart: clear transcript and restart recognition
+                  handleRestartListening();
+                } else {
+                  setHasStartedSession(true);
+                  handleStartListening(false);
+                }
               }}
-              disabled={!allowed || isListening}
+              disabled={!allowed || micPreparing || !micPrepared || (isListening && !isTranscriptionPaused)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                background: !allowed || isListening ? '#f3f4f6' : '#f4f6fa',
-                color: !allowed || isListening ? '#9ca3af' : '#2d3748',
+                background: !allowed ? '#f3f4f6' : hasStartedSession ? '#fff5f5' : '#f4f6fa',
+                color: !allowed ? '#9ca3af' : hasStartedSession ? '#c53030' : '#2d3748',
                 fontWeight: 500,
                 border: '1px solid #d1d9e6',
                 borderRadius: 24,
                 padding: '8px 22px',
                 fontSize: 16,
-                cursor: !allowed || isListening ? 'not-allowed' : 'pointer',
+                cursor: !allowed ? 'not-allowed' : 'pointer',
                 transition: 'background 0.2s, border 0.2s',
                 boxShadow: 'none',
                 outline: 'none',
               }}
-              title={role === "loading" ? "Loading role..." : allowed ? "Start recording" : "Voice Panel is for Doctors only"}
+              title={
+                role === "loading"
+                  ? "Loading role..."
+                  : !allowed
+                    ? "Voice Panel is for Doctors only"
+                    : hasStartedSession
+                      ? "Restart: hapus transkrip dan mulai ulang rekaman"
+                      : "Start recording"
+              }
               onMouseOver={e => {
-                if (!allowed || isListening) return;
-                e.currentTarget.style.background = '#e6eaf3';
-                e.currentTarget.style.border = '1.5px solid #bfc9d9';
+                if (!allowed) return;
+                if (hasStartedSession) {
+                  e.currentTarget.style.background = '#ffe3e3';
+                  e.currentTarget.style.border = '1.5px solid #fc8181';
+                } else {
+                  e.currentTarget.style.background = '#e6eaf3';
+                  e.currentTarget.style.border = '1.5px solid #bfc9d9';
+                }
               }}
               onMouseOut={e => {
-                if (!allowed || isListening) return;
-                e.currentTarget.style.background = '#f4f6fa';
-                e.currentTarget.style.border = '1px solid #d1d9e6';
+                if (!allowed) return;
+                if (hasStartedSession) {
+                  e.currentTarget.style.background = '#fff5f5';
+                  e.currentTarget.style.border = '1px solid #feb2b2';
+                } else {
+                  e.currentTarget.style.background = '#f4f6fa';
+                  e.currentTarget.style.border = '1px solid #d1d9e6';
+                }
               }}
             >
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{marginRight: 6}}>
                 <circle cx="10" cy="10" r="10" fill="#b2f5ea"/>
                 <polygon points="8,6 15,10 8,14" fill="#319795"/>
               </svg>
-              {role === "loading" ? 'Loading...' : allowed ? (hasStartedSession ? 'Restart' : 'Start') : 'Limited access'}
+              {role === "loading"
+                ? 'Loading...'
+                : !allowed
+                  ? 'Limited access'
+                  : hasStartedSession
+                    ? 'Restart'
+                    : 'Start'}
             </button>
 
             <button
               id="stopBtn"
               onClick={() => handleSecondaryAction()}
-              disabled={!allowed}
+              disabled={!allowed || (!hasStartedSession && !transcriptExists)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -658,6 +916,57 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
               {secondaryButtonLabel}
             </button>
           </div>
+
+          <div style={{
+              marginTop: 18,
+              padding: 16,
+              borderRadius: 18,
+              background: '#f8fafc',
+              border: '1px solid #d8e2ea',
+            }}>
+              <div style={{ marginBottom: 12, fontWeight: 600, color: '#0f172a' }}>
+                Choose Pasien
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                <input
+                  type="text"
+                  placeholder="Cari No. RM pasien, misal 01"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 180,
+                    padding: '10px 14px',
+                    borderRadius: 14,
+                    border: '1px solid #cbd5e1',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleSearchPatien}
+                  disabled={searchLoading}
+                  style={{
+                    padding: '10px 16px',
+                    borderRadius: 14,
+                    border: '1px solid #2563eb',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    cursor: searchLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {searchLoading ? 'Mencari...' : 'Cari'}
+                </button>
+              </div>
+              {searchError && (
+                <div style={{ color: '#b91c1c', marginBottom: 12 }}>{searchError}</div>
+              )}
+              {searchResult && (
+                <div style={{ marginBottom: 12, color: '#0f172a' }}>
+                  Hasil: #{searchResult.no_rm}{searchResult.nama_pasien ? ` · ${searchResult.nama_pasien}` : ''}
+                </div>
+              )}
+            </div>
         </div>
 
         {/* Kolom Kanan */}
@@ -741,9 +1050,10 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
                   let collectionSaved = false;
                   let pathologyError: string | null = null;
                   let collectionError: string | null = null;
+                  const kunjunganToSave = selectedKunjungan || normalizeNoRm(searchQuery) || null;
 
                   try {
-                    await saveToPathology(user.id, summaryText);
+                    await saveToPathology(user.id, summaryText, kunjunganToSave);
                     pathologySaved = true;
                   } catch (err: any) {
                     pathologyError = err?.message || String(err);

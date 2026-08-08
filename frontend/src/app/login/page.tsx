@@ -3,6 +3,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/app/lib/supabaseClient";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
+
 export default function LoginPage() {
   const router = useRouter();
   const supabase = supabaseBrowser;
@@ -28,9 +30,38 @@ export default function LoginPage() {
     }
 
     // Verify session after sign-in
-    const { error: userErr } = await supabase.auth.getUser();
+    const { data: { session }, error: userErr } = await supabase.auth.getSession();
     if (userErr) {
       setErr(userErr.message);
+      return;
+    }
+
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      setErr("Sesi login tidak ditemukan.");
+      return;
+    }
+
+    try {
+      const statusResponse = await fetch(`${API_BASE}/api/auth/check-account-status`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!statusResponse.ok) {
+        const statusBody = await statusResponse.json().catch(() => ({}));
+        throw new Error(statusBody?.error || "Gagal memeriksa status akun.");
+      }
+
+      const statusBody = await statusResponse.json() as { is_active?: boolean };
+      if (statusBody.is_active === false) {
+        await supabase.auth.signOut();
+        setErr("Akun Anda saat ini nonaktif. Silakan hubungi Superadmin untuk mengaktifkannya kembali.");
+        return;
+      }
+    } catch (statusError) {
+      setErr(statusError instanceof Error ? statusError.message : "Gagal memeriksa status akun.");
       return;
     }
 

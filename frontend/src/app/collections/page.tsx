@@ -366,13 +366,19 @@ export default function CollectionsPage() {
   const readyItems = filtered.filter((it) => String(it.status_pengiriman || '').toLowerCase().trim() === 'ready');
 
   const updateStatusPengiriman = async (id: string, status: string) => {
+    const normalizedStatus = String(status).toLowerCase().trim();
+    if (normalizedStatus !== 'pending' && normalizedStatus !== 'ready') {
+      console.warn(`Attempted to set unsupported status_pengiriman: ${status}`);
+      return;
+    }
+
     // optimistic update
     const prev = items;
-    setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: status } : it)));
+    setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: normalizedStatus } : it)));
     try {
       const { data, error } = await supabase
         .from('hasil_patologi')
-        .update({ status_pengiriman: status })
+        .update({ status_pengiriman: normalizedStatus })
         .eq('id', id)
         .select('id, status_pengiriman') as any;
 

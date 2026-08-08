@@ -28,6 +28,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from user_status import get_account_is_active
+
 # simple in-memory history store (newest first)
 history_store = []
 
@@ -464,6 +466,36 @@ def get_user_from_access_token(access_token: str):
     with urlopen(request_obj) as response:
         return json.load(response)
 
+
+@app.route('/api/auth/check-account-status', methods=['GET'])
+def check_account_status():
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"error": "Access token is required."}), 401
+
+    try:
+        user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"error": message}), e.code
+    except URLError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        print(f"[check_account_status] Error verifying current user: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to verify current user."}), 500
+
+    return jsonify({"is_active": get_account_is_active(user)})
+
 @app.route('/api/admin/users', methods=['GET'])
 def list_admin_users():
     if not supabase:
@@ -532,6 +564,7 @@ def list_admin_users():
                 "created_at": item.get('created_at'),
                 "last_sign_in_at": item.get('last_sign_in_at'),
                 "email_confirmed_at": item.get('email_confirmed_at'),
+                "is_active": get_account_is_active(item),
             })
 
         return jsonify({"users": users})
@@ -605,7 +638,7 @@ def create_user_admin():
 
     payload = request.get_json(silent=True) or {}
     email = (payload.get('email') or '').strip().lower()
-    password = payload.get('password') or ''
+    password = (payload.get('password') or '')
     username = (payload.get('username') or '').strip()
     display_name = (payload.get('display_name') or username).strip()
     new_role = (payload.get('role') or '').strip().lower() if isinstance(payload.get('role'), str) else ''
@@ -694,8 +727,69 @@ def create_user_admin():
         traceback.print_exc()
         return jsonify({"error": "Failed to create the user."}), 500
 
-@app.route('/api/admin/delete-user/<user_id>', methods=['DELETE'])
-def delete_user_admin(user_id):
+
+def normalize_rm(value: str) -> str:
+    query_rm = str(value or "").strip()
+    if query_rm.isdigit() and len(query_rm) == 1:
+        return query_rm.zfill(2)
+    return query_rm
+
+
+@app.route("/api/pasien/<no_rm>", methods=["GET"])
+def get_master_pasien(no_rm):
+    """
+    Mengambil data administrasi pasien secara otomatis dari master_pasien.
+    Mendukung input angka pendek (misal: '1' atau '01').
+    """
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    try:
+        query_rm = normalize_rm(no_rm)
+
+        res = supabase.table("master_pasien").select("*").eq("no_rm", query_rm).execute()
+        if res.data and len(res.data) > 0:
+            return jsonify({"success": True, "data": res.data[0]}), 200
+
+        return jsonify({"success": False, "message": "Data pasien tidak ditemukan pada SIMRS."}), 404
+    except Exception as e:
+        print(f"Error fetching master_pasien: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"Gagal mengambil data pasien: {str(e)}"}), 500
+
+
+@app.route("/api/pasien/<no_rm>/riwayat", methods=["GET"])
+def get_pasien_riwayat(no_rm):
+    """
+    Mengambil data pasien dari master_pasien dan semua hasil_patologi yang memiliki kunjungan sama.
+    """
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    try:
+        query_rm = normalize_rm(no_rm)
+        patient_response = supabase.table("master_pasien").select("*").eq("no_rm", query_rm).limit(1).execute()
+        patient_data = (patient_response.data or [])
+
+        if not patient_data:
+            return jsonify({"success": False, "message": "Data pasien tidak ditemukan pada SIMRS."}), 404
+
+        riwayat_response = supabase.table("hasil_patologi").select("*").eq("kunjungan", query_rm).order("created_at", desc=True).execute()
+        riwayat_data = list(riwayat_response.data or [])
+
+        return jsonify({
+            "success": True,
+            "pasien": patient_data[0],
+            "riwayat": riwayat_data,
+        }), 200
+    except Exception as e:
+        print(f"Error fetching pasien riwayat: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"Gagal mengambil riwayat pasien: {str(e)}"}), 500
+
+
+@app.route('/api/admin/toggle-user-status/<user_id>', methods=['PATCH'])
+def toggle_user_status_admin(user_id):
     if not supabase:
         return jsonify({"error": "Supabase service is not configured."}), 500
 
@@ -720,7 +814,7 @@ def delete_user_admin(user_id):
     except URLError as e:
         return jsonify({"error": str(e)}), 502
     except Exception as e:
-        print(f"[delete_user_admin] Error verifying current user: {e}")
+        print(f"[toggle_user_status_admin] Error verifying current user: {e}")
         traceback.print_exc()
         return jsonify({"error": "Failed to verify current user."}), 500
 
@@ -728,7 +822,12 @@ def delete_user_admin(user_id):
     raw_meta = current_user.get('raw_user_meta_data') or {}
     current_role = (user_meta.get('role') or raw_meta.get('role') or '').lower()
     if current_role != 'superadmin':
-        return jsonify({"error": "Only superadmin users may delete accounts."}), 403
+        return jsonify({"error": "Only superadmin users may change account status."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    target_is_active = payload.get('is_active')
+    if target_is_active is None:
+        target_is_active = True
 
     try:
         url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{user_id}"
@@ -737,34 +836,49 @@ def delete_user_admin(user_id):
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             "Content-Type": "application/json",
         }
-        
-        # First, fetch the user email before deleting
-        deleted_user_email = ""
-        try:
-            get_request = Request(url, headers=headers, method='GET')
-            with urlopen(get_request) as get_response:
-                get_data = json.load(get_response)
-                deleted_user_email = get_data.get('email', '')
-        except Exception as e:
-            print(f"[delete_user_admin] Failed to fetch deleted user email: {e}")
-        
-        # Now delete the user
-        request_obj = Request(url, headers=headers, method='DELETE')
-        with urlopen(request_obj) as response:
+
+        get_request = Request(url, headers=headers, method='GET')
+        with urlopen(get_request) as get_response:
+            get_data = json.load(get_response)
+
+        user_payload = {
+            "user_metadata": {
+                **(get_data.get('user_metadata') or {}),
+                "is_active": bool(target_is_active),
+            },
+            "app_metadata": {
+                **(get_data.get('app_metadata') or {}),
+                "is_active": bool(target_is_active),
+            },
+        }
+        if get_data.get('raw_user_meta_data'):
+            user_payload["raw_user_meta_data"] = {
+                **(get_data.get('raw_user_meta_data') or {}),
+                "is_active": bool(target_is_active),
+            }
+
+        update_request = Request(url, data=json.dumps(user_payload).encode('utf-8'), headers=headers, method='PUT')
+        with urlopen(update_request) as response:
             body = response.read().decode('utf-8')
             try:
                 data = json.loads(body) if body else {}
             except Exception:
                 data = {}
 
+        deleted_user_email = get_data.get('email', '')
         try:
             actor_id = current_user.get('id')
             actor_email = current_user.get('email') or (user_meta.get('email') if user_meta else '')
-            log_pengiriman_history(None, actor_id, actor_email, "delete_user", deleted_user_email, "success")
+            log_pengiriman_history(None, actor_id, actor_email, "toggle_user_status", deleted_user_email, "success")
         except Exception as e:
-            print(f"[delete_user_admin] Failed to log activity: {e}")
+            print(f"[toggle_user_status_admin] Failed to log activity: {e}")
 
-        return jsonify({"success": True, "deleted_user_id": user_id, "detail": data})
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "is_active": bool(target_is_active),
+            "detail": data,
+        })
     except HTTPError as e:
         try:
             body = e.read().decode('utf-8')
@@ -776,9 +890,9 @@ def delete_user_admin(user_id):
     except URLError as e:
         return jsonify({"error": str(e)}), 502
     except Exception as e:
-        print(f"[delete_user_admin] Unexpected error: {type(e).__name__}: {e}")
+        print(f"[toggle_user_status_admin] Unexpected error: {type(e).__name__}: {e}")
         traceback.print_exc()
-        return jsonify({"error": "Failed to delete user."}), 500
+        return jsonify({"error": "Failed to change user status."}), 500
 
 @app.route('/api/user-meta/<user_id>', methods=['GET'])
 def get_user_meta(user_id):
@@ -998,11 +1112,23 @@ def process_report():
         "status_pengiriman": "pending"
     }
 
-    # 3. Insert ke Supabase
+    # 3. Validasi: pastikan `kunjungan` (No. RM) terdaftar di master_pasien
     try:
+        no_rm_input = str(final_payload.get("kunjungan") or "").strip()
+        normalized_no_rm = normalize_rm(no_rm_input)
+        pasien_check = supabase.table("master_pasien").select("no_rm").eq("no_rm", normalized_no_rm).limit(1).execute()
+        if not pasien_check or not getattr(pasien_check, "data", None) or len(pasien_check.data or []) == 0:
+            return jsonify({
+                "success": False,
+                "error": f"Nomor Kunjungan/RM '{no_rm_input}' tidak terdaftar di SIMRS. Harap periksa kembali nomor kunjungan."
+            }), 400
+
+        # Jika terdaftar, lakukan insert
         response = supabase.table("hasil_patologi").insert(final_payload).execute()
         return jsonify({"status": "success", "data": response.data}), 201
     except Exception as e:
+        print(f"[process_report] Failed to validate/insert: {e}")
+        traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
