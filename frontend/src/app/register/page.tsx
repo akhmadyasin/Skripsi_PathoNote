@@ -234,7 +234,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <div className="image-side">
+      <div className="image-yyside">
         <img src="/login.png" alt="Create User" />
       </div>
     </div>

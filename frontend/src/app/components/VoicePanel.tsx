@@ -93,7 +93,7 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchResult, setSearchResult] = useState<{ no_rm: string; nama_pasien?: string } | null>(null);
+  const [searchResult, setSearchResult] = useState<Record<string, string> | null>(null);
   
   // MODIFIKASI: Tingkatkan interval ke 3000ms (3 detik)
   const MIN_SUMMARY_INTERVAL = 3000; 
@@ -133,6 +133,22 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       : trimmed;
   };
 
+  const fetchPendaftaranByNoRm = async (value: string) => {
+    const query = (value || "").trim();
+    if (!query) {
+      throw new Error("Masukkan nomor RM yang valid.");
+    }
+
+    const response = await fetch(`${BACKEND_ORIGIN}/api/pendaftaran/${encodeURIComponent(query)}`);
+    const payload = await response.json().catch(() => ({ message: "Data pendaftaran tidak ditemukan." }));
+
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message || "Data pendaftaran tidak ditemukan.");
+    }
+
+    return payload.data as Record<string, string>;
+  };
+
   const fetchPasienByNoRm = async (value: string) => {
     const normalized = normalizeNoRm(value);
     if (!normalized) {
@@ -155,20 +171,21 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   const handleSearchPatien = async () => {
     setSearchError(null);
     setSearchResult(null);
-    const normalized = normalizeNoRm(searchQuery);
+    const query = (searchQuery || "").trim();
 
-    if (!normalized) {
-      setSearchError("Masukkan nomor RM pasien yang valid.");
+    if (!query) {
+      setSearchError("Masukkan nomor kunjungan pasien yang valid.");
       return;
     }
 
     setSearchLoading(true);
     try {
-      const pasien = await fetchPasienByNoRm(normalized);
-      setSearchResult(pasien);
-      handleKunjunganSelection(normalized);
+      const pendaftaran = await fetchPendaftaranByNoRm(query);
+      setSearchResult(pendaftaran);
+      setSelectedKunjungan(pendaftaran.no_kunjungan || query);
+      showToast(`Kunjungan ${pendaftaran.no_kunjungan || query} dipilih.`, "success");
     } catch (err: any) {
-      setSearchError(err?.message || "Gagal mencari pasien.");
+      setSearchError(err?.message || "Gagal mencari pendaftaran.");
     } finally {
       setSearchLoading(false);
     }
@@ -185,6 +202,32 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
       })
     );
     showToast(`Kunjungan ${normalized} dipilih.`, "success");
+  };
+
+  const getAutoFillValues = () => {
+    if (!searchResult) return {
+      no_kunjungan: selectedKunjungan,
+      nomor_pa: "",
+      nama_pasien: "",
+      diagnosa_klinik: "",
+      jaringan: "",
+      lokasi: "",
+      unit_pengantar: "",
+      dokter_perujuk: "",
+      cairan_fiksasi: "",
+    };
+
+    return {
+      no_kunjungan: searchResult.no_kunjungan || selectedKunjungan,
+      nomor_pa: searchResult.nomor_pa || "",
+      nama_pasien: searchResult.nama_pasien || "",
+      diagnosa_klinik: searchResult.diagnosa_klinik || "",
+      jaringan: searchResult.jaringan || "",
+      lokasi: searchResult.lokasi || "",
+      unit_pengantar: searchResult.unit_pengantar || "",
+      dokter_perujuk: searchResult.dokter_perujuk || "",
+      cairan_fiksasi: searchResult.cairan_fiksasi || "",
+    };
   };
 
   useEffect(() => {
@@ -698,18 +741,28 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
   // Test hook: handleRestartListening()
   // - Clear session state and attempt to restart recognition.
 
-  const saveToPathology = async (userId: string, text: string, kunjungan: string | null = null) => {
+  const saveToPathology = async (userId: string, text: string, no_kunjungan: string | null = null) => {
     const payload: Record<string, any> = {
       text,
       user_id: userId,
+      no_kunjungan: no_kunjungan,
     };
-    if (kunjungan) {
-      payload.kunjungan = kunjungan;
+
+    // Attach Authorization Bearer token from Supabase client if available
+    let sessionResp: any = null;
+    try {
+      sessionResp = await supabase.auth.getSession();
+    } catch (e) {
+      // ignore
     }
+    const accessToken = sessionResp?.data?.session?.access_token || null;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
     const response = await fetch(`${BACKEND_ORIGIN}/process-report`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
 
@@ -930,9 +983,15 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                 <input
                   type="text"
-                  placeholder="Cari No. RM pasien, misal 01"
+                  placeholder="Cari No. Kunjungan atau No. RM pasien, misal 01"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleSearchPatien();
+                    }
+                  }}
                   style={{
                     flex: 1,
                     minWidth: 180,
@@ -963,7 +1022,25 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
               )}
               {searchResult && (
                 <div style={{ marginBottom: 12, color: '#0f172a' }}>
-                  Hasil: #{searchResult.no_rm}{searchResult.nama_pasien ? ` · ${searchResult.nama_pasien}` : ''}
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>Auto-fill data pasien</div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {[
+                      ["No. Kunjungan", searchResult.no_kunjungan || selectedKunjungan],
+                      ["Nomor PA", searchResult.nomor_pa || ""],
+                      ["Nama Pasien", searchResult.nama_pasien || ""],
+                      ["Diagnosa Klinik", searchResult.diagnosa_klinik || ""],
+                      ["Jaringan", searchResult.jaringan || ""],
+                      ["Lokasi", searchResult.lokasi || ""],
+                      ["Unit Pengantar", searchResult.unit_pengantar || ""],
+                      ["Dokter Perujuk", searchResult.dokter_perujuk || ""],
+                      ["Cairan Fiksasi", searchResult.cairan_fiksasi || ""],
+                    ].map(([label, value]) => (
+                      <div key={String(label)} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ minWidth: 120, fontWeight: 500 }}>{label}:</span>
+                        <span>{value || "-"}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1050,7 +1127,12 @@ export default function VoicePanel({ isOpen = true }: { isOpen?: boolean }) {
                   let collectionSaved = false;
                   let pathologyError: string | null = null;
                   let collectionError: string | null = null;
-                  const kunjunganToSave = selectedKunjungan || normalizeNoRm(searchQuery) || null;
+                  const kunjunganToSave = searchResult?.no_kunjungan || selectedKunjungan || null;
+
+                  if (!kunjunganToSave) {
+                    showToast("Pilih nomor kunjungan terlebih dahulu sebelum menyimpan.", "error");
+                    return;
+                  }
 
                   try {
                     await saveToPathology(user.id, summaryText, kunjunganToSave);

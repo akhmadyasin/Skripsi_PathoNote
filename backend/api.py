@@ -119,30 +119,27 @@ def strip_think(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
 
 def build_prompt(text: str) -> str:
-    # Daftar istilah medis sebagai referensi koreksi AI
-    anchor_terms = (
-        "Lien, Colon, Anus, Mammae, Appendix, Gaster, Hepar, Thyroid, Prostat, Ovarium, Uterus, "
-        "Vesica Fellea, Hiperemis, Perforasi, Kistik, Kenyal, Rapuh, Formalin, "
-        "Epitel Gepeng, Ulseratif, Spindel, Hiperplastis, Polimorfi, Hiperkromatis, Mitosis, "
-        "Udematus, Limfosit, Hemoroid, Carcinoma, Spindel Cell Carcinoma, "
-        "Infiltrasi, Nekrosis, Edema, Hemorajik, Splenomegali, Adenokarsinoma"
-    )
-
     return f"""
 Anda adalah Dokter Spesialis Patologi Anatomi. Ekstrak teks laporan berikut ke JSON.
-Field yang harus dicari:
-- JARINGAN, LOKASI, DIDAPAT_DENGAN, CAIRAN_FIKSASI
-- DIAGNOSA_KLINIK, KETERANGAN_KLINIK
-- MAKROSKOPIK, MIKROSKOPIK, KESIMPULAN
-
-Daftar Istilah Medis (Gunakan sebagai referensi koreksi jika teks terdengar mirip):
-{anchor_terms}
+Hanya hasilkan field berikut:
+- MAKROSKOPIK
+- MIKROSKOPIK
+- KESIMPULAN
+- BUKAN_TUMOR
+- PERILAKU_TUMOR
+- GRADE
+- IMUNO_HISTOKIMIA
+- TOPOGRAPHY
+- MORPHOLOGY
 
 Aturan:
-1. Output WAJIB JSON saja.
-2. Jika tidak ada di teks, isi "".
-3. Gunakan bahasa medis yang baku.
-4. KOREKSI FONETIK: Jika menemukan kata yang salah tulis namun bunyinya mirip dengan istilah medis (contoh: 'Lion' menjadi 'Lien', 'Calon' menjadi 'Colon', 'Plenomegali' menjadi 'Splenomegali'), perbaikilah secara otomatis berdasarkan konteks laporan.
+1. Output WAJIB berupa JSON object tunggal.
+2. Sertakan hanya field yang disebutkan di atas.
+3. Untuk BUKAN_TUMOR gunakan 0 atau 1, untuk PERILAKU_TUMOR gunakan 1, 2, atau 3, GRADE gunakan angka 1-4 atau 0 bila tidak ada, IMUNO_HISTOKIMIA string.
+4. Jika field tidak ada di teks, isi string kosong atau angka 0/1 sesuai jenis.
+5. Untuk kasus IHC/Imunohistokimia, MIKROSKOPIK HARUS tetap diisi dengan deskripsi pengamatan mikroskopis, dan IMUNO_HISTOKIMIA juga harus diisi dengan skor/marker imun yang spesifik.
+6. Jangan sertakan field atau komentar tambahan di luar field yang diminta.
+7. Gunakan bahasa medis yang baku.
 
 Teks: {text}
 JSON:
@@ -164,6 +161,19 @@ def call_ai_api(prompt: str) -> str:
         print(f"[call_ai_api] Error: {e}")
         return ""
 
+ALLOWED_STRUCTURED_KEYS = {
+    "makroskopik",
+    "mikroskopik",
+    "kesimpulan",
+    "bukan_tumor",
+    "perilaku_tumor",
+    "grade",
+    "imuno_histokimia",
+    "topography",
+    "morphology",
+}
+
+
 def _normalize_json_key(key: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(key or "").strip().lower())
 
@@ -184,6 +194,91 @@ def _clean_field_value(value: object) -> str:
     text = text.replace("I'll just output", "")
     text = re.sub(r"\s+", " ", text).strip(" .,:;-")
     return text
+
+
+def _looks_like_ihc_case(text: str | None, jenis_pemeriksaan: object | None = None) -> bool:
+    if str(jenis_pemeriksaan or "").strip() == "3":
+        return True
+
+    candidate = str(text or "").lower()
+    return bool(re.search(r"\b(?:ihc|imunohistokimia|imunohistochemistry|immunohistochemistry)\b", candidate))
+
+
+def _infer_microscopic_description(text: str | None) -> str:
+    if not text:
+        return ""
+
+    cleaned = re.sub(r"\s+", " ", str(text)).strip()
+    if not cleaned:
+        return ""
+
+    patterns = [
+        r"mikroskopik[^.]*?([^.]+)",
+        r"histologi[^.]*?([^.]+)",
+        r"pada preparat[^.]*?([^.]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, cleaned, flags=re.IGNORECASE)
+        if match:
+            candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,:;")
+            if candidate and len(candidate) > 6:
+                return candidate
+
+    sentence_candidates = re.split(r"(?<=[.?!])\s+", cleaned)
+    for sentence in sentence_candidates:
+        lowered = sentence.lower()
+        if any(keyword in lowered for keyword in ["sel", "tumor", "karsinoma", "adenokarsinoma", "invasif", "diferensiasi", "pleomorfik", "mitosis"]):
+            if "imunohistokimia" not in lowered and "ihc" not in lowered:
+                return re.sub(r"\s+", " ", sentence).strip(" .,:;")
+
+    return ""
+
+
+def extract_medical_fields_from_text(text: str) -> dict:
+    """Ekstrak field klinis tambahan dari teks laporan yang diucapkan/diketik."""
+    result = {
+        "bukan_tumor": 1,
+        "perilaku_tumor": None,
+        "grade": None,
+        "imuno_histokimia": "",
+        "topography": "",
+        "morphology": "",
+    }
+    if not text:
+        return result
+
+    normalized_text = str(text).lower()
+
+    if re.search(r"\b(?:non[- ]?tumor|bukan tumor|bukan_tumor|tanpa tumor|selain tumor)\b", normalized_text):
+        result["bukan_tumor"] = 1
+    elif re.search(r"\b(?:tumor|neoplasma|karsinoma|adenokarsinoma|carcinoma|sarcoma|maligna|ganas|metastasis|metastase)\b", normalized_text):
+        result["bukan_tumor"] = 0
+
+    if re.search(r"\b(?:metastasis|metastase|ganas|malignant|agresif)\b", normalized_text):
+        result["perilaku_tumor"] = 3
+    elif re.search(r"\b(?:borderline|berpotensi ganas|intermediate)\b", normalized_text):
+        result["perilaku_tumor"] = 2
+    elif re.search(r"\b(?:jinak|benign|non[- ]?malignant|nonmalignant|reactive)\b", normalized_text):
+        result["perilaku_tumor"] = 1
+
+    grade_match = re.search(r"\bgrade\s*([0-9ivx]+)\b", normalized_text, re.IGNORECASE)
+    if grade_match:
+        raw_grade = grade_match.group(1).lower()
+        grade_map = {"i": 1, "1": 1, "ii": 2, "2": 2, "iii": 3, "3": 3, "iv": 4, "4": 4, "x": 0, "0": 0}
+        result["grade"] = grade_map.get(raw_grade, int(raw_grade) if raw_grade.isdigit() else None)
+
+    ihc_match = re.search(r"(?:imunohistokimia|ihc)(?:\s|:|-)*(?:menunjukkan|terlihat|dengan)?\s*([^.;\n]+)", text, re.IGNORECASE)
+    if ihc_match:
+        candidate = re.sub(r"\s+", " ", ihc_match.group(1)).strip(" .,:;")
+        candidate = re.sub(r"^menunjukkan\s*", "", candidate, flags=re.IGNORECASE)
+        if candidate:
+            result["imuno_histokimia"] = candidate
+    else:
+        marker_match = re.search(r"\b(?:ER|PR|HER2|Ki-67|CK7|CK20|p53|CD3|CD20|EMA|MUC1)\b[^.]*", text, re.IGNORECASE)
+        if marker_match:
+            result["imuno_histokimia"] = re.sub(r"\s+", " ", marker_match.group(0)).strip(" .,:;")
+
+    return result
 
 
 def extract_json(text: str) -> dict:
@@ -226,53 +321,53 @@ def extract_json(text: str) -> dict:
 
 
 def format_summary_fields(structured_data: dict, raw_text: str | None = None) -> str:
-    """Format output ringkasan dari field JSON, atau fallback ke teks transkrip jika JSON kosong."""
+    """Format output ringkasan dari field JSON, termasuk field klinis tambahan."""
     field_map = {
-        "jaringan": "JARINGAN",
-        "lokasi": "LOKASI",
-        "didapatdengan": "DIDAPAT_DENGAN",
-        "cairanfiksasi": "CAIRAN_FIKSASI",
-        "diagnosaklinik": "DIAGNOSA_KLINIK",
-        "keteranganklinik": "KETERANGAN_KLINIK",
         "makroskopik": "MAKROSKOPIK",
         "mikroskopik": "MIKROSKOPIK",
         "kesimpulan": "KESIMPULAN",
+        "bukan_tumor": "BUKAN_TUMOR",
+        "perilaku_tumor": "PERILAKU_TUMOR",
+        "grade": "GRADE",
+        "imuno_histokimia": "IMUNO_HISTOKIMIA",
+        "topography": "TOPOGRAPHY",
+        "morphology": "MORPHOLOGY",
     }
 
-    normalized_data: dict[str, str] = {}
+    normalized_data: dict[str, object] = {}
     for raw_key, value in (structured_data or {}).items():
         normalized_key = _normalize_json_key(raw_key)
-        cleaned_value = _clean_field_value(value)
+        if normalized_key not in ALLOWED_STRUCTURED_KEYS:
+            continue
+
         if normalized_key in field_map:
-            normalized_data[field_map[normalized_key]] = cleaned_value
-        elif cleaned_value:
-            normalized_data[str(raw_key)] = cleaned_value
+            normalized_data[field_map[normalized_key]] = value
+        elif value is not None:
+            normalized_data[str(raw_key)] = value
 
     fields = [
-        ("JARINGAN", normalized_data.get("JARINGAN", "")),
-        ("LOKASI", normalized_data.get("LOKASI", "")),
-        ("DIDAPAT DENGAN", normalized_data.get("DIDAPAT_DENGAN", "")),
-        ("CAIRAN FIKSASI", normalized_data.get("CAIRAN_FIKSASI", "")),
-        ("DIAGNOSA KLINIK", normalized_data.get("DIAGNOSA_KLINIK", "")),
-        ("KETERANGAN KLINIK", normalized_data.get("KETERANGAN_KLINIK", "")),
         ("MAKROSKOPIK", normalized_data.get("MAKROSKOPIK", "")),
         ("MIKROSKOPIK", normalized_data.get("MIKROSKOPIK", "")),
         ("KESIMPULAN", normalized_data.get("KESIMPULAN", "")),
+        ("BUKAN_TUMOR", normalized_data.get("BUKAN_TUMOR", "")),
+        ("PERILAKU_TUMOR", normalized_data.get("PERILAKU_TUMOR", "")),
+        ("GRADE", normalized_data.get("GRADE", "")),
+        ("IMUNO_HISTOKIMIA", normalized_data.get("IMUNO_HISTOKIMIA", "")),
+        ("TOPOGRAPHY", normalized_data.get("TOPOGRAPHY", "")),
+        ("MORPHOLOGY", normalized_data.get("MORPHOLOGY", "")),
     ]
 
     populated_lines = []
     for label, value in fields:
-        clean_value = _clean_field_value(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            clean_value = str(value)
+        else:
+            clean_value = _clean_field_value(value)
         if clean_value:
             populated_lines.append(f"{label}: {clean_value}")
 
     if populated_lines:
         return "\n".join(populated_lines)
-
-    if raw_text:
-        fallback = re.sub(r"\s+", " ", raw_text).strip()
-        if fallback:
-            return fallback[:800] if len(fallback) > 800 else fallback
 
     return "Ringkasan belum tersedia."
 
@@ -735,6 +830,79 @@ def normalize_rm(value: str) -> str:
     return query_rm
 
 
+def fetch_pendaftaran_with_pasien(no_rm: str) -> dict | None:
+    if not supabase:
+        raise RuntimeError("Supabase service is not configured.")
+
+    query = str(no_rm or "").strip()
+    if not query:
+        return None
+
+    # Prioritaskan pencarian berdasarkan no_rm pada pendaftaran_pa
+    try:
+        response = (
+            supabase.table("pendaftaran_pa")
+            .select("*, master_pasien(*)")
+            .eq("no_rm", query)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if getattr(response, "data", None):
+            rows = response.data or []
+            if rows:
+                return rows[0]
+    except Exception as exc:
+        print(f"[fetch_pendaftaran_with_pasien] Relationship select by no_rm failed: {exc}")
+
+    try:
+        response = (
+            supabase.table("pendaftaran_pa")
+            .select("*")
+            .eq("no_rm", query)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if rows:
+            pendaftaran = rows[0]
+            master_response = supabase.table("master_pasien").select("*").eq("no_rm", pendaftaran.get("no_rm")).limit(1).execute()
+            pendaftaran["master_pasien"] = (master_response.data or [None])[0] if getattr(master_response, "data", None) else {}
+            return pendaftaran
+    except Exception as exc:
+        print(f"[fetch_pendaftaran_with_pasien] Manual join by no_rm failed: {exc}")
+
+    # Fallback: jika query berupa no_kunjungan, cari berdasarkan bidang no_kunjungan
+    try:
+        response = (
+            supabase.table("pendaftaran_pa")
+            .select("*, master_pasien(*)")
+            .eq("no_kunjungan", query)
+            .limit(1)
+            .execute()
+        )
+        if getattr(response, "data", None):
+            rows = response.data or []
+            if rows:
+                return rows[0]
+    except Exception as exc:
+        print(f"[fetch_pendaftaran_with_pasien] Relationship select by no_kunjungan failed: {exc}")
+
+    try:
+        response = supabase.table("pendaftaran_pa").select("*").eq("no_kunjungan", query).limit(1).execute()
+        rows = response.data or []
+        if not rows:
+            return None
+        pendaftaran = rows[0]
+        master_response = supabase.table("master_pasien").select("*").eq("no_rm", pendaftaran.get("no_rm")).limit(1).execute()
+        pendaftaran["master_pasien"] = (master_response.data or [None])[0] if getattr(master_response, "data", None) else {}
+        return pendaftaran
+    except Exception as exc:
+        print(f"[fetch_pendaftaran_with_pasien] Manual join by no_kunjungan failed: {exc}")
+        return None
+
+
 @app.route("/api/pasien/<no_rm>", methods=["GET"])
 def get_master_pasien(no_rm):
     """
@@ -761,7 +929,8 @@ def get_master_pasien(no_rm):
 @app.route("/api/pasien/<no_rm>/riwayat", methods=["GET"])
 def get_pasien_riwayat(no_rm):
     """
-    Mengambil data pasien dari master_pasien dan semua hasil_patologi yang memiliki kunjungan sama.
+    Mengambil data pasien dari master_pasien dan semua hasil_patologi yang terkait
+    lewat tabel pendaftaran_pa berdasarkan no_rm / no_kunjungan pasien.
     """
     if not supabase:
         return jsonify({"error": "Supabase service is not configured."}), 500
@@ -769,13 +938,42 @@ def get_pasien_riwayat(no_rm):
     try:
         query_rm = normalize_rm(no_rm)
         patient_response = supabase.table("master_pasien").select("*").eq("no_rm", query_rm).limit(1).execute()
-        patient_data = (patient_response.data or [])
+        patient_data = list(patient_response.data or [])
 
         if not patient_data:
             return jsonify({"success": False, "message": "Data pasien tidak ditemukan pada SIMRS."}), 404
 
-        riwayat_response = supabase.table("hasil_patologi").select("*").eq("kunjungan", query_rm).order("created_at", desc=True).execute()
-        riwayat_data = list(riwayat_response.data or [])
+        pendaftaran_response = (
+            supabase.table("pendaftaran_pa")
+            .select("id")
+            .eq("no_rm", query_rm)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        pendaftaran_rows = list(pendaftaran_response.data or [])
+
+        if not pendaftaran_rows:
+            pendaftaran_fallback = (
+                supabase.table("pendaftaran_pa")
+                .select("id")
+                .eq("no_kunjungan", query_rm)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            pendaftaran_rows = list(pendaftaran_fallback.data or [])
+
+        pendaftaran_ids = [row.get("id") for row in pendaftaran_rows if row.get("id")]
+
+        riwayat_data = []
+        if pendaftaran_ids:
+            riwayat_response = (
+                supabase.table("hasil_patologi")
+                .select("*, pendaftaran_pa(*, master_pasien(*))")
+                .in_("pendaftaran_id", pendaftaran_ids)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            riwayat_data = list(riwayat_response.data or [])
 
         return jsonify({
             "success": True,
@@ -786,6 +984,138 @@ def get_pasien_riwayat(no_rm):
         print(f"Error fetching pasien riwayat: {e}")
         traceback.print_exc()
         return jsonify({"error": f"Gagal mengambil riwayat pasien: {str(e)}"}), 500
+
+
+@app.route("/api/pendaftaran/<no_rm>", methods=["GET"])
+def get_pendaftaran_by_no_rm(no_rm):
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    try:
+        record = fetch_pendaftaran_with_pasien(no_rm)
+        if not record:
+            return jsonify({"success": False, "message": "Data pendaftaran tidak ditemukan."}), 404
+
+        pasien = record.get("master_pasien") or {}
+        combined = {
+            "pendaftaran_id": record.get("id"),
+            "no_kunjungan": record.get("no_kunjungan"),
+            "no_rm": record.get("no_rm"),
+            "nomor_pa": record.get("nomor_pa") or "",
+            "nama_pasien": pasien.get("nama_pasien", ""),
+            "jenis_kelamin": pasien.get("jenis_kelamin", ""),
+            "tgl_lahir": pasien.get("tgl_lahir", ""),
+            "umur": pasien.get("umur", ""),
+            "alamat": pasien.get("alamat", ""),
+            "dokter_perujuk": pasien.get("dokter_perujuk", "") or record.get("dokter_perujuk", ""),
+            "unit_pengantar": record.get("unit_pengantar", "") or pasien.get("unit_pengantar", ""),
+            "cairan_fiksasi": record.get("cairan_fiksasi", ""),
+            "diagnosa_klinik": record.get("diagnosa_klinik", ""),
+            "keterangan_klinik": record.get("keterangan_klinik", ""),
+            "jaringan": record.get("jaringan", ""),
+            "lokasi": record.get("lokasi", ""),
+            "asisten": record.get("asisten", ""),
+            "didapat_dengan": record.get("didapat_dengan", ""),
+            "pa_sebelumnya": record.get("pa_sebelumnya", ""),
+        }
+        return jsonify({"success": True, "data": combined}), 200
+    except Exception as exc:
+        print(f"[get_pendaftaran_by_no_kunjungan] Error: {exc}")
+        traceback.print_exc()
+        return jsonify({"error": f"Gagal mengambil data pendaftaran: {str(exc)}"}), 500
+
+
+@app.route('/api/collections', methods=['GET'])
+def api_collections():
+    """Return joined hasil_patologi + pendaftaran_pa + master_pasien records.
+
+    Optional query params:
+    - user_id: filter by hasil_patologi.user_id
+    - limit: integer limit
+    """
+    if not supabase:
+        return jsonify({"error": "Supabase service is not configured."}), 500
+
+    try:
+        user_id = request.args.get('user_id') or None
+        limit = request.args.get('limit')
+        print(f"[api_collections] request args: user_id={user_id} limit={limit}")
+        try:
+            limit_val = int(limit) if limit else None
+        except Exception:
+            limit_val = None
+
+        query = supabase.table('hasil_patologi').select('*')
+        try:
+            query = query.order('created_at', desc=True)
+        except Exception:
+            pass
+        if limit_val:
+            try:
+                query = query.limit(limit_val)
+            except Exception:
+                pass
+
+        if user_id:
+            query = query.eq('user_id', user_id)
+
+        resp = query.execute()
+        # Log supabase error if any
+        if getattr(resp, 'error', None):
+            try:
+                print(f"[api_collections] supabase.error: {resp.error.message}")
+            except Exception:
+                print(f"[api_collections] supabase.error: {resp.error}")
+        records = list(resp.data or [])
+        print(f"[api_collections] fetched {len(records)} hasil_patologi records")
+
+        combined = []
+        for r in records:
+            pendaftaran = None
+            pasien = None
+            pid = r.get('pendaftaran_id')
+            if pid:
+                try:
+                    presp = supabase.table('pendaftaran_pa').select('*').eq('id', pid).limit(1).execute()
+                    pendaftaran = (presp.data or [None])[0] if getattr(presp, 'data', None) else None
+                except Exception as e:
+                    print(f"[api_collections] failed to fetch pendaftaran for {pid}: {e}")
+
+            if pendaftaran:
+                no_rm = pendaftaran.get('no_rm')
+                if no_rm:
+                    try:
+                        mresp = supabase.table('master_pasien').select('*').eq('no_rm', no_rm).limit(1).execute()
+                        pasien = (mresp.data or [None])[0] if getattr(mresp, 'data', None) else None
+                    except Exception as e:
+                        print(f"[api_collections] failed to fetch master_pasien for {no_rm}: {e}")
+
+            item = dict(r)
+            # merge selected pendaftaran fields
+            if pendaftaran:
+                item['no_kunjungan'] = pendaftaran.get('no_kunjungan')
+                item['no_rm'] = pendaftaran.get('no_rm')
+                item['nomor_pa'] = pendaftaran.get('nomor_pa') or item.get('nomor_pa')
+                item['jaringan'] = pendaftaran.get('jaringan') or item.get('jaringan')
+                item['lokasi'] = pendaftaran.get('lokasi') or item.get('lokasi')
+                item['diagnosa_klinik'] = pendaftaran.get('diagnosa_klinik') or item.get('diagnosa_klinik')
+                item['cairan_fiksasi'] = pendaftaran.get('cairan_fiksasi') or item.get('cairan_fiksasi')
+                item['unit_pengantar'] = pendaftaran.get('unit_pengantar') or item.get('unit_pengantar')
+                item['dokter_perujuk'] = pendaftaran.get('dokter_perujuk') or item.get('dokter_perujuk')
+
+            if pasien:
+                item['nama_pasien'] = pasien.get('nama_pasien')
+                item['tgl_lahir'] = pasien.get('tgl_lahir')
+                item['jenis_kelamin'] = pasien.get('jenis_kelamin')
+                item['alamat'] = pasien.get('alamat')
+
+            combined.append(item)
+
+        return jsonify({"success": True, "data": combined}), 200
+    except Exception as exc:
+        print(f"[api_collections] Exception: {exc}")
+        traceback.print_exc()
+        return jsonify({"success": False, "message": str(exc)}), 500
 
 
 @app.route('/api/admin/toggle-user-status/<user_id>', methods=['PATCH'])
@@ -931,35 +1261,35 @@ def get_user_meta(user_id):
         traceback.print_exc()
         return jsonify({"error": "Failed to retrieve user metadata."}), 500
 
-@app.route('/api/collections', methods=['POST'])
-def create_collection():
+@app.route('/api/collections/legacy', methods=['POST'])
+def create_collection_legacy():
     return jsonify({
         "success": False,
-        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+        "error": "Endpoint koleksi lama dialihkan. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
     }), 410
 
 
-@app.route('/api/collections', methods=['GET'])
-def list_collections():
+@app.route('/api/collections/legacy', methods=['GET'])
+def list_collections_legacy():
     return jsonify({
         "success": False,
-        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+        "error": "Endpoint koleksi lama dialihkan. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
     }), 410
 
 
-@app.route('/api/collections/<collection_id>', methods=['GET'])
-def get_collection_detail(collection_id):
+@app.route('/api/collections/legacy/<collection_id>', methods=['GET'])
+def get_collection_detail_legacy(collection_id):
     return jsonify({
         "success": False,
-        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+        "error": "Endpoint koleksi lama dialihkan. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
     }), 410
 
 
-@app.route('/api/collections/<collection_id>/status', methods=['PATCH'])
-def update_collection_status(collection_id):
+@app.route('/api/collections/legacy/<collection_id>/status', methods=['PATCH'])
+def update_collection_status_legacy(collection_id):
     return jsonify({
         "success": False,
-        "error": "Endpoint koleksi lama telah dihapus. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
+        "error": "Endpoint koleksi lama dialihkan. Gunakan /api/hasil-patologi untuk akses langsung ke tabel hasil_patologi.",
     }), 410
 
 # Ambil murni dari file .env tanpa hardcoded fallback
@@ -998,6 +1328,118 @@ def list_hasil_patologi():
         "records": records,
     })
 
+
+@app.route('/api/hasil-patologi/me', methods=['GET'])
+def list_my_hasil_patologi():
+    """Return hasil_patologi rows for the authenticated user.
+    All roles can access the full collection list so doctor visibility matches
+    the other roles in the collections page.
+    The client must send `Authorization: Bearer <access_token>` header.
+    This endpoint uses the service-role client to bypass RLS and return
+    rows safely after verifying the token.
+    """
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"success": False, "error": "Access token required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"success": False, "error": message}), e.code
+    except URLError as e:
+        return jsonify({"success": False, "error": str(e)}), 502
+    except Exception as e:
+        print(f"[list_my_hasil_patologi] Failed to verify user from token: {e}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": "Failed to verify user."}), 500
+
+    user_id = current_user.get('id')
+    if not user_id:
+        return jsonify({"success": False, "error": "User id not found in token."}), 400
+
+    user_meta = current_user.get('user_metadata') or {}
+    raw_meta = current_user.get('raw_user_meta_data') or {}
+    app_meta = current_user.get('app_metadata') or {}
+    current_role = (user_meta.get('role') or raw_meta.get('role') or app_meta.get('role') or '').lower()
+
+    if not supabase:
+        return jsonify({"success": False, "error": "Supabase not configured."}), 500
+
+    try:
+        query = supabase.table('hasil_patologi').select('*, pendaftaran_pa(*, master_pasien(*))').order('created_at', desc=True).limit(200)
+        response = query.execute()
+        if getattr(response, 'error', None):
+            print(f"[list_my_hasil_patologi] Supabase error: {response.error}")
+        records = list(response.data or [])
+        return jsonify({"success": True, "count": len(records), "records": records})
+    except Exception as e:
+        print(f"[list_my_hasil_patologi] Failed to fetch records: {e}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/hasil-patologi/me/<record_id>', methods=['GET'])
+def get_my_hasil_patologi_detail(record_id):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"success": False, "error": "Access token required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"success": False, "error": message}), e.code
+    except URLError as e:
+        return jsonify({"success": False, "error": str(e)}), 502
+    except Exception as e:
+        print(f"[get_my_hasil_patologi_detail] Failed to verify user from token: {e}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": "Failed to verify user."}), 500
+
+    user_id = current_user.get('id')
+    if not user_id:
+        return jsonify({"success": False, "error": "User id not found in token."}), 400
+
+    if not supabase:
+        return jsonify({"success": False, "error": "Supabase not configured."}), 500
+
+    user_meta = current_user.get('user_metadata') or {}
+    raw_meta = current_user.get('raw_user_meta_data') or {}
+    app_meta = current_user.get('app_metadata') or {}
+    current_role = (user_meta.get('role') or raw_meta.get('role') or app_meta.get('role') or '').lower()
+
+    try:
+        query = supabase.table('hasil_patologi').select('*, pendaftaran_pa(*, master_pasien(*))').eq('id', record_id).limit(1)
+        response = query.execute()
+        if getattr(response, 'error', None):
+            print(f"[get_my_hasil_patologi_detail] Supabase error: {response.error}")
+        records = list(response.data or [])
+        if not records:
+            return jsonify({"success": False, "error": "Record not found."}), 404
+        return jsonify({"success": True, "record": records[0]})
+    except Exception as e:
+        print(f"[get_my_hasil_patologi_detail] Failed to fetch record: {e}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route("/api/hasil-patologi/<record_id>", methods=["GET"])
 def get_hasil_patologi_detail(record_id):
   api_key = request.headers.get("X-API-KEY")
@@ -1026,9 +1468,55 @@ def get_hasil_patologi_detail(record_id):
 
 @app.route('/api/hasil-patologi/<record_id>', methods=['DELETE'])
 def delete_hasil_patologi(record_id):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "error": "Authorization header missing or invalid."}), 401
+
+    access_token = auth_header.split(' ', 1)[1].strip()
+    if not access_token:
+        return jsonify({"success": False, "error": "Access token required."}), 401
+
+    try:
+        current_user = get_user_from_access_token(access_token)
+    except HTTPError as e:
+        try:
+            body = e.read().decode('utf-8')
+            error_payload = json.loads(body)
+            message = error_payload.get('message') or body
+        except Exception:
+            message = str(e)
+        return jsonify({"success": False, "error": message}), e.code
+    except URLError as e:
+        return jsonify({"success": False, "error": str(e)}), 502
+    except Exception as e:
+        print(f"[delete_hasil_patologi] Failed to verify user: {e}")
+        traceback.print_exc()
+        return jsonify({"success": False, "error": "Failed to verify user."}), 500
+
+    user_id = current_user.get('id')
+    if not user_id:
+        return jsonify({"success": False, "error": "User id not found in token."}), 400
+
     try:
         if not supabase:
             return jsonify({"success": False, "error": "Supabase service is not configured."}), 500
+
+        record_response = supabase.table("hasil_patologi").select("id, user_id").eq("id", record_id).limit(1).execute()
+        rows = list(record_response.data or [])
+        if not rows:
+            return jsonify({"success": False, "error": "Record not found."}), 404
+
+        record = rows[0]
+        user_meta = current_user.get('user_metadata') or {}
+        raw_meta = current_user.get('raw_user_meta_data') or {}
+        app_meta = current_user.get('app_metadata') or {}
+        current_role = (user_meta.get('role') or raw_meta.get('role') or app_meta.get('role') or '').lower()
+
+        if current_role == 'dokter' and str(record.get('user_id') or '') != str(user_id):
+            return jsonify({"success": False, "error": "Anda hanya dapat menghapus data milik akun Anda sendiri."}), 403
+
+        if current_role not in {'dokter', 'petugas', 'superadmin'}:
+            return jsonify({"success": False, "error": "Role tidak diizinkan untuk menghapus collection."}), 403
 
         try:
             history_response = supabase.table("history_pengiriman").select("id, hasil_patologi_id").execute()
@@ -1052,79 +1540,109 @@ def delete_hasil_patologi(record_id):
 
 @app.route('/process-report', methods=['POST'])
 def process_report():
-    data = request.json
-    raw_text = data.get('text')
+    data = request.json or {}
+    raw_text = data.get('text') or ''
     user_id = data.get('user_id')
-    
+    no_kunjungan = str(data.get('no_kunjungan') or '').strip()
+
+    # Prefer server-side verified user_id from Authorization bearer token when available.
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        access_token = auth_header.split(' ', 1)[1].strip()
+        try:
+            verified_user = get_user_from_access_token(access_token)
+            if verified_user and isinstance(verified_user, dict):
+                verified_id = verified_user.get('id')
+                if verified_id:
+                    if user_id and str(user_id) != str(verified_id):
+                        print(f"[process_report] Overriding provided user_id {user_id} with verified id {verified_id}")
+                    user_id = verified_id
+        except Exception as e:
+            print(f"[process_report] Could not verify access token for process-report: {e}")
+
+    if not no_kunjungan:
+        return jsonify({"status": "error", "message": "no_kunjungan is required."}), 400
+
+    pendaftaran = fetch_pendaftaran_with_pasien(no_kunjungan)
+    if not pendaftaran:
+        return jsonify({
+            "status": "error",
+            "message": f"Nomor Kunjungan '{no_kunjungan}' tidak ditemukan di pendaftaran_pa."
+        }), 400
+
+    pendaftaran_id = pendaftaran.get('id')
+    if not pendaftaran_id:
+        return jsonify({"status": "error", "message": "pendaftaran_id tidak tersedia untuk pendaftaran tersebut."}), 500
+
     # 1. Panggil AI untuk Ekstraksi Medis
     ai_response = call_ai_api(build_prompt(raw_text))
     structured_data = extract_json(ai_response)
+    computed_medical_fields = extract_medical_fields_from_text(raw_text)
+    is_ihc_case = _looks_like_ihc_case(raw_text, data.get("jenis_pemeriksaan"))
+
+    if is_ihc_case:
+        inferred_microscopic = _infer_microscopic_description(raw_text)
+        if inferred_microscopic and not (structured_data.get("MIKROSKOPIK") or structured_data.get("mikroskopik")):
+            structured_data["MIKROSKOPIK"] = inferred_microscopic
+            structured_data["mikroskopik"] = inferred_microscopic
+        if computed_medical_fields.get("imuno_histokimia") and not (structured_data.get("IMUNO_HISTOKIMIA") or structured_data.get("imuno_histokimia")):
+            structured_data["IMUNO_HISTOKIMIA"] = computed_medical_fields["imuno_histokimia"]
+            structured_data["imuno_histokimia"] = computed_medical_fields["imuno_histokimia"]
 
     # 2. Siapkan Payload Lengkap sesuai Tabel SQL
     # Kita bagi jadi beberapa bagian agar rapi
-    
-    requested_nomor_pa = str(data.get("nomor_pa") or "").strip()
+
+    requested_nomor_pa = str(data.get("nomor_pa") or pendaftaran.get("nomor_pa") or "").strip()
     if not requested_nomor_pa or requested_nomor_pa == "000000":
         requested_nomor_pa = generate_nomor_pa()
 
+    ihc_request_value = str(data.get("permintaan_ihc") or "").strip() or ("IHC" if is_ihc_case else "")
+
+    def _coerce_int(value: object, default: int = 0) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        text = str(value).strip()
+        if not text:
+            return default
+        try:
+            return int(float(text))
+        except ValueError:
+            return default
+
     final_payload = {
+        "pendaftaran_id": pendaftaran_id,
         "user_id": user_id,
-        
-        # --- DATA ADMINISTRATIF ---
-        "kunjungan": data.get("kunjungan", "AUTO-" + datetime.now().strftime("%Y%m%d%H%M")),
-        "tanggal": datetime.now().strftime("%Y-%m-%d"),
-        "waktu": datetime.now().strftime("%H:%M:%S"),
-        "jenis_pemeriksaan": 1,
-        "id_simgos": "layanan.laboratorium.pa.hasil.Model-3", # Sesuai format JSON RS kamu
-        "nomor_pa": requested_nomor_pa,
-        "pa_sebelumnya": "",
-        "asisten": data.get("asisten", "AI-PathoNote"),
-        "dokter": 14, # Hardcoded Jazay / Bisa ambil dari profil
-        "oleh": 0,
+        "makroskopik": structured_data.get("MAKROSKOPIK", "") or structured_data.get("makroskopik", ""),
+        "mikroskopik": structured_data.get("MIKROSKOPIK", "") or structured_data.get("mikroskopik", ""),
+        "kesimpulan": structured_data.get("KESIMPULAN", "") or structured_data.get("kesimpulan", ""),
+        "bukan_tumor": _coerce_int(computed_medical_fields.get("bukan_tumor", 1), default=1),
+        "perilaku_tumor": _coerce_int(computed_medical_fields.get("perilaku_tumor") if computed_medical_fields.get("perilaku_tumor") is not None else (structured_data.get("PERILAKU_TUMOR", 0) or structured_data.get("perilaku_tumor", 0)), default=0),
+        "grade": _coerce_int(computed_medical_fields.get("grade") if computed_medical_fields.get("grade") is not None else (structured_data.get("GRADE", 0) or structured_data.get("grade", 0)), default=0),
+        "imuno_histokimia": computed_medical_fields.get("imuno_histokimia", "") or structured_data.get("IMUNO_HISTOKIMIA", "") or structured_data.get("imuno_histokimia", ""),
+        "topography": structured_data.get("TOPOGRAPHY", "") or structured_data.get("topography", ""),
+        "morphology": structured_data.get("MORPHOLOGY", "") or structured_data.get("morphology", ""),
         "status": 1,
-
-        # --- DATA TEKNIS MEDIS (Hasil Ekstraksi AI) ---
-        "jaringan": structured_data.get("JARINGAN", ""),
-        "lokasi": structured_data.get("LOKASI", ""),
-        "didapat_dengan": structured_data.get("DIDAPAT_DENGAN", ""),
-        "cairan_fiksasi": structured_data.get("CAIRAN_FIKSASI", ""),
-        "diagnosa_klinik": structured_data.get("DIAGNOSA_KLINIK", ""),
-        "keterangan_klinik": structured_data.get("KETERANGAN_KLINIK", ""),
-        
-        # --- OUTPUT UTAMA ---
-        "makroskopik": structured_data.get("MAKROSKOPIK", ""),
-        "mikroskopik": structured_data.get("MIKROSKOPIK", ""),
-        "kesimpulan": structured_data.get("KESIMPULAN", ""),
-
-        # --- DATA SPESIFIK TUMOR / TAMBAHAN (Default Values) ---
-        "permintaan_ihc": "",
-        "topography": "",
-        "morphology": "",
-        "grade": 0,
-        "perilaku_tumor": 0,
-        "imuno_histokimia": "",
-        "bukan_tumor": 1, 
-        "reevolusi": "",
-        "reevaluasi": "",
-        "tanggal_imuno": None,
-
-        # --- TRACKING ---
-        "status_pengiriman": "pending"
+        "status_pengiriman": "draft",
     }
 
-    # 3. Validasi: pastikan `kunjungan` (No. RM) terdaftar di master_pasien
     try:
-        no_rm_input = str(final_payload.get("kunjungan") or "").strip()
-        normalized_no_rm = normalize_rm(no_rm_input)
-        pasien_check = supabase.table("master_pasien").select("no_rm").eq("no_rm", normalized_no_rm).limit(1).execute()
-        if not pasien_check or not getattr(pasien_check, "data", None) or len(pasien_check.data or []) == 0:
-            return jsonify({
-                "success": False,
-                "error": f"Nomor Kunjungan/RM '{no_rm_input}' tidak terdaftar di SIMRS. Harap periksa kembali nomor kunjungan."
-            }), 400
-
-        # Jika terdaftar, lakukan insert
         response = supabase.table("hasil_patologi").insert(final_payload).execute()
+        if getattr(response, "error", None):
+            return jsonify({"status": "error", "message": str(response.error)}), 500
+
+        if pendaftaran_id:
+            pendaftaran_update_payload = {"permintaan_ihc": ihc_request_value}
+            try:
+                update_response = supabase.table("pendaftaran_pa").update(pendaftaran_update_payload).eq("id", pendaftaran_id).execute()
+                if getattr(update_response, "error", None):
+                    print(f"[process_report] Non-blocking pendaftaran_pa update warning: {update_response.error}")
+            except Exception as update_exc:
+                print(f"[process_report] Non-blocking pendaftaran_pa update warning: {update_exc}")
+
         return jsonify({"status": "success", "data": response.data}), 201
     except Exception as e:
         print(f"[process_report] Failed to validate/insert: {e}")

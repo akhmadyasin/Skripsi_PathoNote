@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from 'date-fns';
 import { useRouter } from "next/navigation";
-import { supabaseBrowser } from "@/app/lib/supabaseClient";
+import { supabase } from "@/app/lib/supabaseClient";
 import s from "@/app/styles/dashboard.module.css"; // reuse layout styles
 import h from "@/app/styles/collections.module.css";   // styles khusus collections
 import { getSessionUserProfile } from '@/app/lib/userProfile';
@@ -213,7 +213,7 @@ const SAMPLE: CollectionItem[] = [];
 
 export default function CollectionsPage() {
   const router = useRouter();
-  const supabase = supabaseBrowser;
+  const supabaseClient = supabase;
 
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:5001";
 
@@ -234,6 +234,132 @@ export default function CollectionsPage() {
     }
   }
 
+  const fetchCollections = async (userId: string, role: string) => {
+    try {
+      console.log('fetchCollections called with', { userId, role });
+      // Try backend authenticated endpoint first (bypass RLS issues)
+      try {
+        const sessionResp = await supabaseClient.auth.getSession();
+        const accessToken = sessionResp?.data?.session?.access_token || null;
+        if (accessToken) {
+          try {
+            const resp = await fetch(`${API_BASE}/api/hasil-patologi/me`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (resp.ok) {
+              const json = await resp.json().catch(() => null);
+              if (json && json.success && Array.isArray(json.records)) {
+                console.log('Fetched collections from backend /me endpoint:', json.records.length);
+                return json.records;
+              }
+            } else {
+              console.warn('/api/hasil-patologi/me returned', resp.status, await resp.text().catch(() => ''));
+            }
+          } catch (e) {
+            console.warn('Failed to call backend /api/hasil-patologi/me:', e);
+          }
+        }
+      } catch (e) {
+        // ignore session retrieval errors and continue to supabase client path
+      }
+      let query = supabaseClient
+        .from('hasil_patologi')
+        .select(`
+          id,
+          created_at,
+          status,
+          makroskopik,
+          mikroskopik,
+          kesimpulan,
+          user_id,
+          status_pengiriman,
+          pendaftaran_pa (
+            id,
+            no_kunjungan,
+            nomor_pa,
+            jaringan,
+            lokasi,
+            diagnosa_klinik,
+            asisten,
+            master_pasien (
+              no_rm,
+              nama_pasien,
+              jenis_kelamin,
+              tgl_lahir
+            )
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      const { data, error } = await query;
+      if (error) {
+        try {
+          console.error('Error fetching from Supabase:', error, JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        } catch (e) {
+          console.error('Error fetching from Supabase:', error);
+        }
+        return [];
+      }
+
+      // Fetch related history_pengiriman separately (FK may not be present for nested select)
+      let enriched = (data || []).map((it: any) => ({ ...it, latest_pengiriman: null }));
+      try {
+        const ids = enriched.map((it: any) => it.id).filter(Boolean);
+        if (ids.length) {
+          const { data: histories, error: histErr } = await supabaseClient
+            .from('history_pengiriman')
+            .select('id,hasil_patologi_id,metode_pengiriman,tujuan_pengiriman,status,created_at')
+            .in('hasil_patologi_id', ids)
+            .order('created_at', { ascending: false });
+
+          if (histErr) {
+            console.warn('Failed to fetch history_pengiriman:', histErr);
+          } else if (Array.isArray(histories)) {
+            const latestMap: Record<string, any> = {};
+            for (const h of histories) {
+              const pid = h?.hasil_patologi_id;
+              if (!pid) continue;
+              if (!latestMap[pid]) latestMap[pid] = h;
+            }
+            enriched = enriched.map((it: any) => ({ ...it, latest_pengiriman: latestMap[it.id] || null }));
+          }
+        }
+      } catch (hfetchErr) {
+        console.warn('Unexpected error fetching history_pengiriman:', hfetchErr);
+      }
+
+      console.log('Data collections berhasil didapat:', enriched);
+
+      // If there are no results, attempt a quick unfiltered check (debugging aid)
+      if ((!enriched || enriched.length === 0) && process.env.NODE_ENV !== 'production') {
+        try {
+          const { data: unfiltered, error: uErr } = await supabaseClient
+            .from('hasil_patologi')
+            .select('id, user_id, created_at')
+            .limit(5);
+          if (uErr) {
+            console.warn('Unfiltered check error:', uErr);
+          } else {
+            console.log('Unfiltered check returned rows:', unfiltered && unfiltered.length, unfiltered);
+            // log whether any of the returned rows match current userId
+            try {
+              const anyMatch = Array.isArray(unfiltered) && unfiltered.some((r: any) => String(r.user_id) === String(userId));
+              console.log('Any unfiltered rows have user_id === current userId?', anyMatch);
+            } catch (mErr) {
+              // ignore
+            }
+          }
+        } catch (u) {
+          console.warn('Unfiltered check unexpected error', u);
+        }
+      }
+      return enriched || [];
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      return [];
+    }
+  };
+
   // auth/session
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState<string>("");
@@ -249,6 +375,15 @@ export default function CollectionsPage() {
   
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<CollectionItem[]>(SAMPLE);
+
+  const normalizeStatusPengiriman = (value: unknown): string => {
+    const normalized = String(value ?? 'draft').toLowerCase().trim();
+    if (normalized === 'ready' || normalized === 'draft') return normalized;
+    if (normalized === 'pending' || normalized === 'success' || normalized === 'sent' || normalized === 'completed' || normalized === 'received') {
+      return 'draft';
+    }
+    return 'draft';
+  };
 
   // Initialize query from URL search param so topbar search navigates here
   useEffect(() => {
@@ -289,33 +424,8 @@ export default function CollectionsPage() {
       // fetch user summaries from Supabase (only for authenticated user)
       try {
         const userId = session.user.id;
-
-        let query = supabase
-          .from('hasil_patologi')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        // Dokter should only see their own pathology records.
-        if (profile.role === 'dokter') {
-          query = query.eq('user_id', userId);
-        }
-
-        console.debug('Collections fetch', {
-          userId,
-          role: profile.role,
-          tokenClaimRole,
-          isPetugasOrSuperadmin,
-          sessionMeta: profile.meta,
-          query: profile.role === 'dokter' ? 'own records only' : 'all records',
-        });
-
-        const { data, error } = await query;
-
-        if (error) {
-          console.error('Error fetching pathology records:', error?.message || error, error?.details || 'no details');
-        } else if (data) {
-          setItems(data as CollectionItem[]);
-        }
+        const fetchedItems = await fetchCollections(userId, profile.role);
+        setItems(fetchedItems as CollectionItem[]);
       } catch (err) {
         console.error('Unexpected error fetching collections', err);
       } finally {
@@ -361,18 +471,29 @@ export default function CollectionsPage() {
     );
   }, [items, query]);
 
-  // Split by status_pengiriman: ready vs others (waiting)
-  const waitingItems = filtered.filter((it) => String(it.status_pengiriman || '').toLowerCase().trim() !== 'ready');
-  const readyItems = filtered.filter((it) => String(it.status_pengiriman || '').toLowerCase().trim() === 'ready');
+  // Split by status_pengiriman: ready vs draft (legacy pending/success values are treated as draft)
+  const waitingItems = filtered.filter((it) => normalizeStatusPengiriman(it.status_pengiriman) !== 'ready');
+  const readyItems = filtered.filter((it) => normalizeStatusPengiriman(it.status_pengiriman) === 'ready');
+
+  const normalizeRelation = (relation: any) => {
+    if (Array.isArray(relation)) {
+      return relation[0] || null;
+    }
+    return relation || null;
+  };
 
   const updateStatusPengiriman = async (id: string, status: string) => {
+    if (userRole !== 'petugas') {
+      alert('Hanya role Petugas yang dapat mengubah status pengiriman.');
+      return;
+    }
+
     const normalizedStatus = String(status).toLowerCase().trim();
-    if (normalizedStatus !== 'pending' && normalizedStatus !== 'ready') {
+    if (normalizedStatus !== 'draft' && normalizedStatus !== 'ready') {
       console.warn(`Attempted to set unsupported status_pengiriman: ${status}`);
       return;
     }
 
-    // optimistic update
     const prev = items;
     setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: normalizedStatus } : it)));
     try {
@@ -383,7 +504,6 @@ export default function CollectionsPage() {
         .select('id, status_pengiriman') as any;
 
       if (error) throw error;
-      // refresh local item with returned value if provided
       if (data && Array.isArray(data) && data[0]) {
         const updated = data[0];
         setItems((p) => p.map((it) => (it.id === id ? { ...it, status_pengiriman: updated.status_pengiriman } : it)));
@@ -394,54 +514,65 @@ export default function CollectionsPage() {
     }
   };
 
-  const renderCard = (it: CollectionItem) => (
-    <article key={it.id} className={h.historyCard}>
-      <div className={h.cardHeader}>
-        <div className={h.cardDate}>
-          <span className={h.dateIcon}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="3" y1="10" x2="21" y2="10"></line>
-            </svg>
-          </span>
-          {formatItemDate(it)}
-        </div>
-        <div className={h.cardTopActions}>
-          {tokenRole !== 'authenticated' && (
-            <button className={h.exportBtn} onClick={() => alert('Export functionality coming soon!')} title="Export">
+  const renderCard = (it: CollectionItem) => {
+    const pendaftaran = normalizeRelation(it.pendaftaran_pa);
+    const pasien = normalizeRelation(normalizeRelation(pendaftaran?.master_pasien));
+    const statusPengiriman = normalizeStatusPengiriman(it.status_pengiriman);
+    const isReady = statusPengiriman === 'ready';
+
+    return (
+      <article key={it.id} className={h.historyCard}>
+        <div className={h.cardHeader}>
+          <div className={h.cardDate}>
+            <span className={h.dateIcon}>
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7,10 12,15 17,10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
               </svg>
-            </button>
-          )}
-
+            </span>
+            {formatItemDate(it)}
+          </div>
+          <div className={h.cardTopActions}>
+            {tokenRole !== 'authenticated' && (
+              <button className={h.exportBtn} onClick={() => alert('Export functionality coming soon!')} title="Export">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7,10 12,15 17,10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className={h.cardContent}>
-        <div>
-          <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
-            [{it.nomor_pa || 'AUTO'}] - {it.jaringan || it.lokasi || '-'}
-          </div>
-          <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
-            <strong>Oleh:</strong> {userMetaMap[it.user_id]?.username || it.user_id || '-'}
-          </div>
-          <div className={h.summary} style={{ marginBottom: 8 }}>
-            <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}
-          </div>
-          <div className={h.itemDate}>
-            {formatItemDate(it) || '-'}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-            <div style={{ background: (String(it.status_pengiriman || '').toLowerCase() === 'ready' ? '#e6ffed' : '#fff7e6'), padding: '4px 8px', borderRadius: 6, fontSize: 12 }}>
-              <strong>Status Kirim:</strong> {String(it.status_pengiriman || 'pending')}
+        <div className={h.cardContent}>
+          <div>
+            <div className={h.transcript} style={{ fontWeight: 700, marginBottom: 8 }}>
+              [{pendaftaran?.nomor_pa || 'AUTO'}] - {pendaftaran?.jaringan || pendaftaran?.lokasi || '-'}
             </div>
+            <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+              <strong>Nama Pasien:</strong> {pasien?.nama_pasien || 'Nama Pasien'}
+            </div>
+            <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+              <strong>No. RM:</strong> {pasien?.no_rm || '-'}</div>
+            <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+              <strong>No. Kunjungan:</strong> {pendaftaran?.no_kunjungan || '-'}</div>
+            <div style={{ marginBottom: 6, color: '#555', fontSize: 13 }}>
+              <strong>Diagnosa Klinis:</strong> {pendaftaran?.diagnosa_klinik || '-'}</div>
+            <div className={h.summary} style={{ marginBottom: 8 }}>
+              <strong>Kesimpulan:</strong> {it.kesimpulan || '-'}
+            </div>
+            <div className={h.itemDate}>
+              {formatItemDate(it) || '-'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+              <div style={{ background: (isReady ? '#e6ffed' : '#fff7e6'), padding: '4px 8px', borderRadius: 6, fontSize: 12 }}>
+                <strong>Status:</strong> {isReady ? 'Ready' : 'Draft'}
+              </div>
               {userRole === 'petugas' && (() => {
-                const st = String(it.status_pengiriman || '').toLowerCase().trim();
+                const st = normalizeStatusPengiriman(it.status_pengiriman);
                 return (
                   <div style={{ display: 'flex', gap: 6 }}>
                     {st !== 'ready' && (
@@ -450,52 +581,53 @@ export default function CollectionsPage() {
                       </button>
                     )}
                     {st === 'ready' && (
-                      <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => updateStatusPengiriman(it.id, 'pending')}>
-                        Set Pending
+                      <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => updateStatusPengiriman(it.id, 'draft')}>
+                        Set Draft
                       </button>
                     )}
                   </div>
                 );
               })()}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className={h.cardActions}>
-        <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
-          <span className={h.btnIcon}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-          </span>
-          View Details
-        </button>
-        <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(getReportText(it))}>
-          <span className={h.btnIcon}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-            </svg>
-          </span>
-          Copy
-        </button>
-        {userRole !== 'superadmin' && (
-          <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
-          <span className={h.btnIcon}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3,6 5,6 21,6"></polyline>
-              <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
-          </span>
-          Delete
+        <div className={h.cardActions}>
+          <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => router.push(`/detail/${it.id}`)}>
+            <span className={h.btnIcon}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </span>
+            View Details
           </button>
-        )}
-      </div>
-    </article>
-  );
+          <button className={`${h.actionBtn} ${h.secondaryBtn}`} onClick={() => handleCopy(getReportText(it))}>
+            <span className={h.btnIcon}>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              </svg>
+            </span>
+            Copy
+          </button>
+          {(userRole === 'petugas' || userRole === 'superadmin' || userRole === 'dokter') && (
+            <button className={`${h.actionBtn} ${h.dangerBtn}`} onClick={() => handleDelete(it.id)}>
+              <span className={h.btnIcon}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3,6 5,6 21,6"></polyline>
+                  <path d="M19,6v14a2,2 0 0,1 -2,2H7a2,2 0 0,1 -2,-2V6m3,0V4a2,2 0 0,1 2,-2h4a2,2 0 0,1 2,2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </span>
+              Delete
+            </button>
+          )}
+        </div>
+      </article>
+    );
+  };
 
   const handleCopy = async (text: string) => {
     try {
@@ -509,32 +641,31 @@ export default function CollectionsPage() {
   const handleDelete = (id: string) => {
     if (!confirm("Apakah Anda yakin ingin menghapus koleksi ini?")) return;
 
-    // optimistic UI update
     const prev = items;
     setItems((p) => p.filter((x) => x.id !== id));
 
     (async () => {
       try {
-        const userRes = await supabase.auth.getUser();
-        const userId = userRes?.data?.user?.id;
-        if (!userId) {
-          throw new Error('User tidak terautentikasi');
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session?.access_token) {
+          throw new Error('Sesi tidak valid untuk menghapus data.');
         }
-        const { data: deleted, error } = await supabase
-          .from('hasil_patologi')
-          .delete()
-          .eq('id', id)
-          .eq('user_id', userId)
-          .select('id');
 
-        if (error) throw error;
-        // If no rows were returned, nothing was deleted (maybe RLS or mismatch)
-        if (!deleted || (Array.isArray(deleted) && deleted.length === 0)) {
-          throw new Error('Tidak dapat menghapus baris di database (akses ditolak atau baris tidak ditemukan)');
+        const response = await fetch(`${API_BASE}/api/hasil-patologi/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result?.error || 'Tidak dapat menghapus koleksi.');
         }
       } catch (err: any) {
         alert('Gagal menghapus koleksi: ' + (err?.message || String(err)));
-        setItems(prev); // rollback
+        setItems(prev);
       }
     })();
   };

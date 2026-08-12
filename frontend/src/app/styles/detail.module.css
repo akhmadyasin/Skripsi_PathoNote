@@ -1,6 +1,8 @@
 .detailContainer {
-  max-width: 900px;
+  max-width: 1200px;
+  width: min(100%, 1200px);
   margin: 0 auto;
+  padding: 0 16px 32px;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -90,7 +92,14 @@
 .detailContent {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
+}
+
+.detailSections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
 }
 
 .contentSection {
@@ -99,6 +108,45 @@
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.detailSection {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.detailFieldList {
+  display: grid;
+  gap: 10px;
+}
+
+.detailFieldRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr);
+  gap: 12px 16px;
+  align-items: start;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.detailFieldLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.5;
+}
+
+.detailFieldValue {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .sectionHeader {
@@ -258,6 +306,12 @@
 }
 
 /* Responsive Design */
+@media (max-width: 900px) {
+  .detailSections {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
   .detailHeader {
     flex-direction: column;
@@ -267,6 +321,7 @@
 
   .headerActions {
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .detailMeta {
@@ -285,8 +340,14 @@
     justify-content: center;
   }
 
-  .contentSection {
+  .contentSection,
+  .detailSection {
     padding: 16px;
+  }
+
+  .detailFieldRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .detailTitle {

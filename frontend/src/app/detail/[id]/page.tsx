@@ -65,6 +65,28 @@ const FIELD_LABELS: Record<string, string> = {
   CAIRAN_FIKSASI: 'Cairan Fiksasi',
 };
 
+const ICDO_TOPOGRAPHY_OPTIONS = [
+  'C50.9 - Payudara, NOS',
+  'C18.9 - Kolon, NOS',
+  'C34.9 - Paru-paru, NOS',
+  'C16.9 - Lambung, NOS',
+  'C20.9 - Rektum, NOS',
+  'C44.9 - Kulit, NOS',
+  'C61.9 - Prostat, NOS',
+  'C67.9 - Kandung kemih, NOS',
+];
+
+const ICDO_MORPHOLOGY_OPTIONS = [
+  'M8000/3 - Neoplasma ganas, NOS',
+  'M8140/3 - Adenokarsinoma',
+  'M8500/3 - Karsinoma duktal invasif',
+  'M8830/3 - Leiomiosarkoma',
+  'M9050/3 - Fibrosarkoma',
+  'M8070/3 - Karsinoma skuamosa',
+  'M8720/3 - Melanoma malignum',
+  'M9100/3 - Fibrohistiocytoma malignum',
+];
+
 const NON_EDITABLE_FIELDS = new Set([
   'id',
   'user_id',
@@ -73,10 +95,81 @@ const NON_EDITABLE_FIELDS = new Set([
   'status',
   'status_data',
   'status_pengiriman',
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'waktu',
+  'permintaan_ihc',
+]);
+
+const HASIL_PATOLOGI_EDITABLE_FIELDS = new Set([
+  'jenis_pemeriksaan',
+  'topography',
+  'morphology',
+  'grade',
+  'perilaku_tumor',
+  'makroskopik',
+  'mikroskopik',
+  'kesimpulan',
+  'imuno_histokimia',
+  'bukan_tumor',
+  'reevolusi',
+  'tanggal_imuno',
+  'dokter',
+  'oleh',
+  'status',
+]);
+
+const PENDAFTARAN_PA_EDITABLE_FIELDS = new Set([
+  'asisten',
+  'didapat_dengan',
+  'cairan_fiksasi',
+  'jaringan',
+  'lokasi',
+  'pa_sebelumnya',
+  'dokter_perujuk',
+  'unit_pengantar',
+  'nomor_pa',
+  'no_kunjungan',
+]);
+
+const FORBIDDEN_UPDATE_FIELDS = new Set([
+  'alamat',
+  'nama_pasien',
+  'no_rm',
+  'jenis_kelamin',
+  'tgl_lahir',
+  'umur',
+  'pendaftaran_pa',
+  'master_pasien',
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'waktu',
 ]);
 
 function isEditableField(key: string) {
   return !NON_EDITABLE_FIELDS.has(key.toLowerCase());
+}
+
+function splitEditableUpdatePayload(record: PathologyRecord, values: Partial<PathologyRecord>) {
+  const hasilPatologiUpdates: Record<string, any> = {};
+  const pendaftaranUpdates: Record<string, any> = {};
+
+  Object.keys(values).forEach((key) => {
+    const normalized = key.toLowerCase();
+    if (FORBIDDEN_UPDATE_FIELDS.has(normalized)) return;
+    if (!isEditableField(key)) return;
+
+    if (HASIL_PATOLOGI_EDITABLE_FIELDS.has(normalized)) {
+      hasilPatologiUpdates[key] = values[key];
+      return;
+    }
+
+    if (PENDAFTARAN_PA_EDITABLE_FIELDS.has(normalized) && record?.pendaftaran_id) {
+      pendaftaranUpdates[key] = values[key];
+    }
+  });
+
+  return { hasilPatologiUpdates, pendaftaranUpdates };
 }
 
 // Test hook: isEditableField(key)
@@ -99,6 +192,69 @@ function renderFieldValue(value: any) {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value);
+}
+
+function shouldShowIhcField(fieldKey: string, record: PathologyRecord | null) {
+  if (!record) return false;
+
+  const hasIhcRequest = Boolean(String(record.permintaan_ihc ?? '').trim());
+  const jenisPemeriksaan = String(record.jenis_pemeriksaan ?? '').trim().toLowerCase();
+  const isIhcCase = jenisPemeriksaan === '3' || jenisPemeriksaan === 'ihc' || jenisPemeriksaan === 'imunohistokimia';
+
+  if (fieldKey === 'permintaan_ihc') {
+    return hasIhcRequest || isIhcCase;
+  }
+
+  return hasIhcRequest || isIhcCase;
+}
+
+function normalizeRelationValue(value: any) {
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
+}
+
+function flattenDetailRecord(item: PathologyRecord) {
+  if (!item || typeof item !== 'object') return item;
+
+  const flattened: PathologyRecord = { ...item };
+  const pendaftaran = normalizeRelationValue(flattened.pendaftaran_pa);
+  const pasien = normalizeRelationValue(pendaftaran?.master_pasien);
+
+  const pendaftaranKeys = [
+    'id',
+    'no_kunjungan',
+    'nomor_pa',
+    'pa_sebelumnya',
+    'jaringan',
+    'lokasi',
+    'cairan_fiksasi',
+    'diagnosa_klinik',
+    'keterangan_klinik',
+    'asisten',
+    'didapat_dengan',
+    'dokter_perujuk',
+    'unit_pengantar',
+    'permintaan_ihc',
+  ];
+
+  pendaftaranKeys.forEach((key) => {
+    if ((flattened[key] === undefined || flattened[key] === null || flattened[key] === '') && pendaftaran?.[key] != null) {
+      flattened[key] = pendaftaran[key];
+    }
+  });
+
+  const pasienKeys = ['no_rm', 'nama_pasien', 'jenis_kelamin', 'tgl_lahir', 'umur', 'alamat'];
+  pasienKeys.forEach((key) => {
+    if ((flattened[key] === undefined || flattened[key] === null || flattened[key] === '') && pasien?.[key] != null) {
+      flattened[key] = pasien[key];
+    }
+  });
+
+  // Remove raw nested relation objects once flattened to avoid duplicate/raw JSON presentation
+  delete flattened.pendaftaran_pa;
+  delete flattened.master_pasien;
+
+  return flattened;
 }
 
 // Test hook: renderFieldValue(value)
@@ -161,6 +317,50 @@ const RESULTS_FIELDS: string[] = [
   'makroskopik',
   'mikroskopik',
   'kesimpulan',
+];
+
+const PATIENT_FIELDS: string[] = [
+  'nama_pasien',
+  'no_rm',
+  'jenis_kelamin',
+  'tgl_lahir',
+  'umur',
+  'alamat',
+];
+
+const PENGANTAR_PA_FIELDS: string[] = [
+  'no_kunjungan',
+  'nomor_pa',
+  'pa_sebelumnya',
+  'jaringan',
+  'lokasi',
+  'cairan_fiksasi',
+  'diagnosa_klinik',
+  'keterangan_klinik',
+  'asisten',
+  'didapat_dengan',
+  'dokter_perujuk',
+  'unit_pengantar',
+];
+
+const PATHOLOGY_FIELDS: string[] = [
+  'jenis_pemeriksaan',
+  'topography',
+  'morphology',
+  'grade',
+  'perilaku_tumor',
+  'permintaan_ihc',
+  'imuno_histokimia',
+  'bukan_tumor',
+  'reevolusi',
+  'tanggal_imuno',
+  'waktu',
+  'status',
+  'status_data',
+  'status_pengiriman',
+  'created_at',
+  'user_id',
+  ...RESULTS_FIELDS,
 ];
 
 function buildSectionKeys(item: PathologyRecord, keys: string[]) {
@@ -406,26 +606,70 @@ export default function DetailPage() {
     setDetailData(null);
 
     try {
+      const sessionResp = await supabase.auth.getSession();
+      const accessToken = sessionResp?.data?.session?.access_token;
+      if (accessToken) {
+        const resp = await fetch(`${API_BASE}/api/hasil-patologi/me/${encodeURIComponent(id)}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const json = await resp.json().catch(() => null);
+        if (resp.ok && json?.success && json.record) {
+          setDetailData(flattenDetailRecord(json.record) as PathologyRecord);
+          setNotFound(false);
+          return;
+        }
+        console.warn('Backend detail endpoint failed:', resp.status, json);
+      }
+
       const { data, error } = await supabase
         .from('hasil_patologi')
-        .select('*')
+        .select(`
+          *,
+          pendaftaran_pa (
+            id,
+            no_kunjungan,
+            nomor_pa,
+            pa_sebelumnya,
+            jaringan,
+            lokasi,
+            cairan_fiksasi,
+            diagnosa_klinik,
+            keterangan_klinik,
+            asisten,
+            didapat_dengan,
+            dokter_perujuk,
+            unit_pengantar,
+            permintaan_ihc,
+            master_pasien (
+              no_rm,
+              nama_pasien,
+              jenis_kelamin,
+              tgl_lahir,
+              umur,
+              alamat
+            )
+          )
+        `)
         .eq('id', id)
-        .single();
+        .limit(1);
 
       if (error) {
         console.error('Error fetching pathology record:', error);
-        setErrorText(error.message || JSON.stringify(error));
+        setErrorText(error.message || JSON.stringify(error, null, 2));
         setNotFound(true);
         return;
       }
 
-      if (!data) {
+          const record = Array.isArray(data) ? data[0] : data;
+      if (!record) {
         setErrorText('No data returned');
         setNotFound(true);
         return;
       }
 
-      setDetailData(data as PathologyRecord);
+      setDetailData(flattenDetailRecord(record) as PathologyRecord);
       setNotFound(false);
     } catch (err: any) {
       console.error('Unexpected error loading detail:', err);
@@ -479,9 +723,15 @@ export default function DetailPage() {
     if (!detailData) return;
     const initial: Partial<PathologyRecord> = {};
     getReportFieldKeys(detailData)
-      .filter(isEditableField)
+      .filter((field) => isEditableField(field) && !FORBIDDEN_UPDATE_FIELDS.has(field.toLowerCase()))
       .forEach((field) => {
-        initial[field] = detailData[field];
+        const normalized = field.toLowerCase();
+        if (
+          HASIL_PATOLOGI_EDITABLE_FIELDS.has(normalized) ||
+          PENDAFTARAN_PA_EDITABLE_FIELDS.has(normalized)
+        ) {
+          initial[field] = detailData[field];
+        }
       });
     setEditValues(initial);
     setSaveStatus(null);
@@ -498,32 +748,65 @@ export default function DetailPage() {
     setIsSaving(true);
     setSaveStatus(null);
 
-    const updates: Record<string, any> = {};
-    getReportFieldKeys(detailData)
-      .filter(isEditableField)
-      .forEach((field) => {
-        if (field in editValues) {
-          updates[field] = editValues[field];
-        }
-      });
+    const { hasilPatologiUpdates, pendaftaranUpdates } = splitEditableUpdatePayload(detailData, editValues);
+
+    if (Object.keys(hasilPatologiUpdates).length === 0 && Object.keys(pendaftaranUpdates).length === 0) {
+      setSaveStatus({ type: 'error', message: 'Tidak ada data yang bisa disimpan.' });
+      setIsSaving(false);
+      return;
+    }
+
+    console.log('[saveEdit] payload debug', {
+      hasilPatologiId: detailData.id,
+      pendaftaranId: detailData.pendaftaran_id,
+      hasilPatologiUpdates,
+      pendaftaranUpdates,
+    });
 
     try {
-      const { data, error } = await supabase
-        .from('hasil_patologi')
-        .update(updates)
-        .eq('id', detailData.id)
-        .select('*')
-        .single();
+      let refreshedRecord = { ...detailData };
 
-      if (error) {
-        throw error;
+      if (Object.keys(hasilPatologiUpdates).length > 0) {
+        const { data: hasilData, error: hasilError } = await supabase
+          .from('hasil_patologi')
+          .update(hasilPatologiUpdates)
+          .eq('id', detailData.id)
+          .select('*');
+
+        if (hasilError) throw hasilError;
+
+        const updatedResult = Array.isArray(hasilData) ? hasilData[0] : hasilData;
+        if (updatedResult) {
+          refreshedRecord = { ...refreshedRecord, ...updatedResult };
+        } else {
+          console.warn('[saveEdit] No row returned after updating hasil_patologi', { detailDataId: detailData.id, hasilPatologiUpdates });
+        }
       }
 
-      if (data) {
-        setDetailData(data as PathologyRecord);
-        setIsEditing(false);
-        setSaveStatus({ type: 'success', message: 'Perubahan berhasil disimpan.' });
+      if (Object.keys(pendaftaranUpdates).length > 0) {
+        if (!detailData.pendaftaran_id) {
+          throw new Error('ID pendaftaran tidak tersedia untuk update data pengantar.');
+        }
+
+        const { data: pendaftaranData, error: pendaftaranError } = await supabase
+          .from('pendaftaran_pa')
+          .update(pendaftaranUpdates)
+          .eq('id', detailData.pendaftaran_id)
+          .select('*');
+
+        if (pendaftaranError) throw pendaftaranError;
+
+        const updatedPendaftaran = Array.isArray(pendaftaranData) ? pendaftaranData[0] : pendaftaranData;
+        if (updatedPendaftaran) {
+          refreshedRecord = { ...refreshedRecord, ...updatedPendaftaran, pendaftaran_id: detailData.pendaftaran_id };
+        } else {
+          console.warn('[saveEdit] No row returned after updating pendaftaran_pa', { pendaftaranId: detailData.pendaftaran_id, pendaftaranUpdates });
+        }
       }
+
+      setDetailData(refreshedRecord as PathologyRecord);
+      setIsEditing(false);
+      setSaveStatus({ type: 'success', message: 'Perubahan berhasil disimpan.' });
     } catch (err: any) {
       console.error('Save error:', err);
       setSaveStatus({ type: 'error', message: err?.message || 'Gagal menyimpan perubahan.' });
@@ -550,10 +833,6 @@ export default function DetailPage() {
           cairan_fiksasi: p.cairan_fiksasi || (editValues.cairan_fiksasi ?? detailData?.cairan_fiksasi),
           keterangan_klinik: `Dokter Perujuk: ${p.dokter_perujuk || '-'}${p.unit_pengantar ? ` | Unit: ${p.unit_pengantar}` : ''}${p.umur ? ` | Umur: ${p.umur}` : ''}`,
         };
-
-        if ('nama_pasien' in (detailData || {}) || 'nama_pasien' in editValues) {
-          (autoFillValues as any).nama_pasien = p.nama_pasien || '';
-        }
 
         setEditValues((prev) => ({ ...prev, ...autoFillValues }));
         setSaveStatus({ type: 'success', message: `Data pasien ${p.nama_pasien || normalizedNoRm} berhasil dimuat otomatis.` });
@@ -1220,47 +1499,141 @@ export default function DetailPage() {
             </div>
           )}
 
-          
-
-          <div className={h.cardContent}>
-            <div className={h.reportFields}>
-              {getReportFieldKeys(detailData).map((fieldKey) => (
-                <div key={fieldKey} className={h.reportFieldRow}>
-                  <div className={h.reportFieldName}>{formatFieldName(fieldKey)}</div>
-                  {isEditing && isEditableField(fieldKey) ? (
-                    ['kesimpulan', 'makroskopik', 'mikroskopik', 'keterangan_klinik', 'diagnosa_klinik', 'didapat_dengan', 'cairan_fiksasi'].includes(fieldKey) ? (
-                      <textarea
-                        className={d.editTextarea}
-                        value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
-                        onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
-                        rows={3}
-                      />
-                    ) : (
-                      <>
-                        <input
-                          className={d.editInput}
-                          type="text"
-                          value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
-                          onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
-                        />
-                        {fieldKey === 'kunjungan' && (
-                          <button
-                            className={d.actionButton}
-                            type="button"
-                            disabled={isAutoFillLoading}
-                            style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center' }}
-                            onClick={() => handleAutoFillPasien(String(editValues.kunjungan ?? detailData.kunjungan ?? ''))}
-                          >
-                            {isAutoFillLoading ? 'Memuat...' : 'Auto-Fill Pasien'}
-                          </button>
-                        )}
-                      </>
-                    )
-                  ) : (
-                    <div className={h.reportFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>
-                  )}
+          <div className={d.detailContent}>
+            <div className={d.detailSections}>
+              <div className={d.detailSection}>
+                <h2 className={d.sectionTitle}>Informasi Pasien</h2>
+                <div className={d.detailFieldList}>
+                  {PATIENT_FIELDS.map((fieldKey) => (
+                    <div key={fieldKey} className={d.detailFieldRow}>
+                      <div className={d.detailFieldLabel}>{formatFieldName(fieldKey)}</div>
+                      <div className={d.detailFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <div className={d.detailSection}>
+                <h2 className={d.sectionTitle}>Data Pengantar PA</h2>
+                <div className={d.detailFieldList}>
+                  {PENGANTAR_PA_FIELDS.map((fieldKey) => (
+                    <div key={fieldKey} className={d.detailFieldRow}>
+                      <div className={d.detailFieldLabel}>{formatFieldName(fieldKey)}</div>
+                      <div className={d.detailFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className={d.detailSection}>
+              <h2 className={d.sectionTitle}>Hasil Patologi</h2>
+              <div className={d.detailFieldList}>
+                {PATHOLOGY_FIELDS.map((fieldKey) => {
+                  if (!Object.prototype.hasOwnProperty.call(detailData, fieldKey)) return null;
+
+                  const shouldHideIhcFields = ['imuno_histokimia', 'permintaan_ihc', 'tanggal_imuno'].includes(fieldKey) && !shouldShowIhcField(fieldKey, detailData);
+                  if (shouldHideIhcFields) {
+                    return null;
+                  }
+
+                  const isTextareaField = ['kesimpulan', 'makroskopik', 'mikroskopik', 'keterangan_klinik', 'diagnosa_klinik', 'didapat_dengan', 'cairan_fiksasi', 'imuno_histokimia'].includes(fieldKey);
+                  const isGradeField = fieldKey === 'grade';
+                  const isPerilakuTumorField = fieldKey === 'perilaku_tumor';
+                  const isTopographyField = fieldKey === 'topography';
+                  const isMorphologyField = fieldKey === 'morphology';
+
+                  return (
+                    <div key={fieldKey} className={d.detailFieldRow}>
+                      <div className={d.detailFieldLabel}>{formatFieldName(fieldKey)}</div>
+                      {isEditing && isEditableField(fieldKey) ? (
+                        isTextareaField ? (
+                          <textarea
+                            className={d.editTextarea}
+                            value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                            rows={3}
+                          />
+                        ) : isGradeField ? (
+                          <select
+                            className={d.editInput}
+                            value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                          >
+                            <option value="">Pilih grade</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                          </select>
+                        ) : isPerilakuTumorField ? (
+                          <select
+                            className={d.editInput}
+                            value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                          >
+                            <option value="">Pilih perilaku tumor</option>
+                            <option value="1">1 - Jinak</option>
+                            <option value="2">2 - Borderline</option>
+                            <option value="3">3 - Ganas</option>
+                          </select>
+                        ) : isTopographyField ? (
+                          <>
+                            <input
+                              className={d.editInput}
+                              type="text"
+                              list="icdo-topography-options"
+                              value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                              onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                              placeholder="Contoh: C50.9"
+                              autoComplete="off"
+                            />
+                            <datalist id="icdo-topography-options">
+                              {ICDO_TOPOGRAPHY_OPTIONS.map((option) => (
+                                <option key={option} value={option} />
+                              ))}
+                            </datalist>
+                          </>
+                        ) : isMorphologyField ? (
+                          <>
+                            <input
+                              className={d.editInput}
+                              type="text"
+                              list="icdo-morphology-options"
+                              value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                              onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                              placeholder="Contoh: M8000/3"
+                              autoComplete="off"
+                            />
+                            <datalist id="icdo-morphology-options">
+                              {ICDO_MORPHOLOGY_OPTIONS.map((option) => (
+                                <option key={option} value={option} />
+                              ))}
+                            </datalist>
+                          </>
+                        ) : fieldKey === 'permintaan_ihc' ? (
+                          <input
+                            className={d.editInput}
+                            type="text"
+                            value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                            placeholder="Contoh: ER, PR, HER2"
+                          />
+                        ) : (
+                          <input
+                            className={d.editInput}
+                            type="text"
+                            value={String(editValues[fieldKey] ?? detailData[fieldKey] ?? '')}
+                            onChange={(e) => setEditValues((prev) => ({ ...prev, [fieldKey]: e.target.value }))}
+                          />
+                        )
+                      ) : (
+                        <div className={d.detailFieldValue}>{renderFieldValue(detailData[fieldKey])}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
